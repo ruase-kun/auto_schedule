@@ -1,0 +1,92 @@
+/**
+ * 00_DataModels.js — JSDoc型定義（全モジュール共通）
+ *
+ * 実行コードなし。エディタ補完・ドキュメント用の型定義のみ。
+ */
+
+/**
+ * 時間帯（分表現）
+ * @typedef {Object} TimeWindow
+ * @property {number} startMin - 開始（分）
+ * @property {number} endMin   - 終了（分）
+ */
+
+/**
+ * コマ定義
+ * @typedef {Object} TimeSlot
+ * @property {string} slotId    - コマID（例: "slot_1"）
+ * @property {number} rowNumber - テンプレート上の行番号
+ * @property {number} startMin  - 開始時刻（分）
+ * @property {number} endMin    - 終了時刻（分）
+ */
+
+/**
+ * 休憩時刻
+ * @typedef {Object} BreakTimes
+ * @property {number} amFirst  - AM前半（分）
+ * @property {number} amSecond - AM後半（分）
+ * @property {number} pmFirst  - PM前半（分）
+ * @property {number} pmSecond - PM後半（分）
+ */
+
+/**
+ * シフト時間定義
+ * @typedef {Object} ShiftTimeDef
+ * @property {number} start         - 勤務開始（分）
+ * @property {number} end           - 勤務終了（分）
+ * @property {number} pulldownStart - プルダウン開始（分）
+ * @property {number} pulldownEnd   - プルダウン終了（分）
+ */
+
+/**
+ * コンフィグ全体
+ * @typedef {Object} Config
+ * @property {TimeSlot[]}                     slots             - コマ定義（開始時刻昇順）
+ * @property {BreakTimes}                     breakTimes        - 休憩時刻
+ * @property {number}                         breakDuration     - 休憩時間（分）
+ * @property {Object<number, number[]>}       breakExclusionMap - 休憩行→除外行マッピング
+ * @property {Object<string, ShiftTimeDef>}   shiftTimes        - シフト名→時間定義
+ */
+
+/**
+ * 持ち場プリセット
+ * @typedef {Object} PostPreset
+ * @property {string}       postName       - 持ち場名
+ * @property {boolean}      enabled        - 有効フラグ
+ * @property {number}       requiredLv     - 必要スキルレベル（1〜4）
+ * @property {number}       order          - 決定順序（小さいほど優先）
+ * @property {string}       sortDir        - ソート方向 "ASC" | "DESC"
+ * @property {string|null}  concurrentPost - 掛け持ち先（null=なし）
+ * @property {TimeWindow[]} activeWindows  - 有効時間帯（空配列=終日有効）
+ */
+
+/**
+ * 出勤スタッフ
+ * @typedef {Object} Staff
+ * @property {string} name          - スタッフ名
+ * @property {string} employment    - 雇用形態（SkillService結合後に設定）
+ * @property {string} shiftType     - シフト種別（"早朝"|"午前"|"午後"|"時差"）
+ * @property {number} shiftStartMin - シフト開始（分）
+ * @property {number} shiftEndMin   - シフト終了（分）
+ */
+
+/**
+ * テンプレ時間行
+ * @typedef {Object} TimeRow
+ * @property {number} rowNumber - 行番号（1始まり）
+ * @property {number} timeMin   - 時刻（分）
+ * @property {string} timeStr   - 時刻文字列 "H:MM"
+ */
+
+/**
+ * 部署プロファイル
+ * @typedef {Object} DepartmentProfile
+ * @property {string}  name            - 部署名
+ * @property {string}  extractSheet    - 抽出シート名
+ * @property {string}  templateSheet   - テンプレートシート名
+ * @property {string}  skillSheet      - スキルレベル表シート名
+ * @property {string}  presetSheet     - プリセットシート名
+ * @property {string}  configSheet     - コンフィグシート名
+ * @property {boolean} enableWaves     - 陣スケジュール有効
+ * @property {string}  dateSheetSuffix - 日付シートサフィックス
+ */
