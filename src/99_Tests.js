@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1+2+3+4+5+6 テストスイート
+ * 99_Tests.js — Phase 1~6+1.5 テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1+2+3+4+5+6 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1~6+1.5 テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,7 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1+2+3+4+5+6 テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1~6+1.5 テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -165,6 +165,9 @@ function runAllPhase1Tests() {
   // Phase 6 純粋テスト
   testHistoryServicePure_();
 
+  // Phase 1.5 純粋テスト
+  testDepartmentServicePure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -174,7 +177,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1+2+3+4+5+6 テスト結果 ===\n' +
+    '=== Phase 1~6+1.5 テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -189,11 +192,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1+2+3+4+5+6 テスト結果',
+      ui.alert('Phase 1~6+1.5 テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1+2+3+4+5+6 テスト結果',
+      ui.alert('Phase 1~6+1.5 テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -2186,5 +2189,144 @@ function testHistoryServicePure_() {
       ]
     };
     assertDeepEqual_('統合例JSON', json, expected);
+  });
+}
+
+/* ---------- DepartmentService テスト (Phase 1.5) ---------- */
+
+function testDepartmentServicePure_() {
+  testGroup_('DepartmentService.parseEnableWaves_', function () {
+    // #1 boolean true
+    assertEqual_('parseEnableWaves_(true)',
+      DepartmentService.parseEnableWaves_(true), true);
+    // #2 boolean false
+    assertEqual_('parseEnableWaves_(false)',
+      DepartmentService.parseEnableWaves_(false), false);
+    // #3 文字列 "TRUE"
+    assertEqual_('parseEnableWaves_("TRUE")',
+      DepartmentService.parseEnableWaves_('TRUE'), true);
+    // #4 文字列 "FALSE"
+    assertEqual_('parseEnableWaves_("FALSE")',
+      DepartmentService.parseEnableWaves_('FALSE'), false);
+    // #5 空文字列
+    assertEqual_('parseEnableWaves_("")',
+      DepartmentService.parseEnableWaves_(''), false);
+    // #6 小文字 "true"
+    assertEqual_('parseEnableWaves_("true")',
+      DepartmentService.parseEnableWaves_('true'), true);
+  });
+
+  testGroup_('DepartmentService.parseProfileRow_', function () {
+    // #7 販売基本
+    var row1 = ['販売', '02_販売のみ抽出', '03_配置テンプレート', '04_スキルレベル表',
+                '05_配置プリセット', '06_コンフィグ', false, ''];
+    assertDeepEqual_('parseProfileRow_: 販売基本',
+      DepartmentService.parseProfileRow_(row1, 0),
+      {
+        name: '販売', extractSheet: '02_販売のみ抽出',
+        templateSheet: '03_配置テンプレート', skillSheet: '04_スキルレベル表',
+        presetSheet: '05_配置プリセット', configSheet: '06_コンフィグ',
+        enableWaves: false, dateSheetSuffix: ''
+      });
+
+    // #8 通販（enableWaves=TRUE文字列, suffix付き）
+    var row2 = ['通販', '02_通販抽出', '03_通販テンプレート', '04_通販スキル',
+                '05_通販プリセット', '06_通販コンフィグ', 'TRUE', '_通販'];
+    assertDeepEqual_('parseProfileRow_: 通販',
+      DepartmentService.parseProfileRow_(row2, 1),
+      {
+        name: '通販', extractSheet: '02_通販抽出',
+        templateSheet: '03_通販テンプレート', skillSheet: '04_通販スキル',
+        presetSheet: '05_通販プリセット', configSheet: '06_通販コンフィグ',
+        enableWaves: true, dateSheetSuffix: '_通販'
+      });
+
+    // #9 suffix列省略（row[7]がundefined）
+    var row3 = ['買取', '02_買取抽出', '03_買取テンプレート', '04_買取スキル',
+                '05_買取プリセット', '06_買取コンフィグ', false];
+    assertDeepEqual_('parseProfileRow_: suffix省略',
+      DepartmentService.parseProfileRow_(row3, 2),
+      {
+        name: '買取', extractSheet: '02_買取抽出',
+        templateSheet: '03_買取テンプレート', skillSheet: '04_買取スキル',
+        presetSheet: '05_買取プリセット', configSheet: '06_買取コンフィグ',
+        enableWaves: false, dateSheetSuffix: ''
+      });
+  });
+
+  testGroup_('DepartmentService.validateProfile_', function () {
+    var validProfile = {
+      name: '販売', extractSheet: '02_販売のみ抽出',
+      templateSheet: '03_配置テンプレート', skillSheet: '04_スキルレベル表',
+      presetSheet: '05_配置プリセット', configSheet: '06_コンフィグ',
+      enableWaves: false, dateSheetSuffix: ''
+    };
+
+    // #10 正常
+    var noError = true;
+    try { DepartmentService.validateProfile_(validProfile, 0); }
+    catch (e) { noError = false; }
+    assertTrue_('validateProfile_: 正常', noError);
+
+    // #11 extractSheet空
+    assertThrows_('validateProfile_: extractSheet空', function () {
+      var p = { name: '販売', extractSheet: '', templateSheet: 'a',
+                skillSheet: 'b', presetSheet: 'c', configSheet: 'd',
+                enableWaves: false, dateSheetSuffix: '' };
+      DepartmentService.validateProfile_(p, 0);
+    });
+
+    // #12 templateSheet空
+    assertThrows_('validateProfile_: templateSheet空', function () {
+      var p = { name: '販売', extractSheet: 'a', templateSheet: '',
+                skillSheet: 'b', presetSheet: 'c', configSheet: 'd',
+                enableWaves: false, dateSheetSuffix: '' };
+      DepartmentService.validateProfile_(p, 0);
+    });
+
+    // #13 skillSheet空
+    assertThrows_('validateProfile_: skillSheet空', function () {
+      var p = { name: '販売', extractSheet: 'a', templateSheet: 'b',
+                skillSheet: '', presetSheet: 'c', configSheet: 'd',
+                enableWaves: false, dateSheetSuffix: '' };
+      DepartmentService.validateProfile_(p, 0);
+    });
+
+    // #14 presetSheet空
+    assertThrows_('validateProfile_: presetSheet空', function () {
+      var p = { name: '販売', extractSheet: 'a', templateSheet: 'b',
+                skillSheet: 'c', presetSheet: '', configSheet: 'd',
+                enableWaves: false, dateSheetSuffix: '' };
+      DepartmentService.validateProfile_(p, 0);
+    });
+
+    // #15 configSheet空
+    assertThrows_('validateProfile_: configSheet空', function () {
+      var p = { name: '販売', extractSheet: 'a', templateSheet: 'b',
+                skillSheet: 'c', presetSheet: 'd', configSheet: '',
+                enableWaves: false, dateSheetSuffix: '' };
+      DepartmentService.validateProfile_(p, 0);
+    });
+  });
+
+  testGroup_('DepartmentService.getProfileByName', function () {
+    var profiles = [
+      { name: '販売', extractSheet: 'a', templateSheet: 'b', skillSheet: 'c',
+        presetSheet: 'd', configSheet: 'e', enableWaves: false, dateSheetSuffix: '' },
+      { name: '通販', extractSheet: 'f', templateSheet: 'g', skillSheet: 'h',
+        presetSheet: 'i', configSheet: 'j', enableWaves: true, dateSheetSuffix: '_通販' }
+    ];
+
+    // #16 見つかる
+    assertEqual_('getProfileByName: 見つかる',
+      DepartmentService.getProfileByName(profiles, '通販').name, '通販');
+
+    // #17 見つからない
+    assertEqual_('getProfileByName: 見つからない',
+      DepartmentService.getProfileByName(profiles, '不存在'), null);
+
+    // #18 空配列
+    assertEqual_('getProfileByName: 空配列',
+      DepartmentService.getProfileByName([], '販売'), null);
   });
 }
