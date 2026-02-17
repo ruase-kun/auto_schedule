@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1 テストスイート
+ * 99_Tests.js — Phase 1+2 テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1+2 テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,7 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1 テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1+2 テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -144,10 +144,14 @@ function runAllPhase1Tests() {
   // カウンタリセット
   testResults_ = { passed: 0, failed: 0, skipped: 0, errors: [] };
 
+  // Phase 1 純粋テスト
   testTimeUtils_();
   testConfigServicePure_();
   testPresetServicePure_();
   testAttendanceServicePure_();
+
+  // Phase 2 純粋テスト
+  testExclusionServicePure_();
 
   // 統合テスト
   testSheetGatewayIntegration_();
@@ -158,7 +162,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1 テスト結果 ===\n' +
+    '=== Phase 1+2 テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -173,11 +177,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1 テスト結果',
+      ui.alert('Phase 1+2 テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1 テスト結果',
+      ui.alert('Phase 1+2 テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -557,5 +561,222 @@ function testSkillServiceIntegration_() {
       'mergeEmployment sets employment',
       mockStaff[0].employment !== '' || result.employmentMap[staffNames[0]] === ''
     );
+  });
+}
+
+/* ---------- ExclusionService 純粋テスト ---------- */
+
+function testExclusionServicePure_() {
+
+  // createEmpty
+  testGroup_('ExclusionService.createEmpty', function () {
+    var excl = ExclusionService.createEmpty();
+    assertDeepEqual_('createEmpty().allDay', excl.allDay, {});
+    assertDeepEqual_('createEmpty().timeRanges', excl.timeRanges, []);
+    assertDeepEqual_('createEmpty().tournaments', excl.tournaments, []);
+  });
+
+  // buildAllDaySet
+  testGroup_('ExclusionService.buildAllDaySet', function () {
+    var set = ExclusionService.buildAllDaySet(['田中', '山田']);
+    assertEqual_('buildAllDaySet 田中', set['田中'], true);
+    assertEqual_('buildAllDaySet 山田', set['山田'], true);
+    assertEqual_('buildAllDaySet 佐藤 undefined', set['佐藤'], undefined);
+
+    // 空文字・空白スキップ
+    var set2 = ExclusionService.buildAllDaySet(['田中', '', '  ', '鈴木']);
+    assertEqual_('buildAllDaySet skips empty', set2[''], undefined);
+    assertEqual_('buildAllDaySet skips whitespace', set2['  '], undefined);
+    assertEqual_('buildAllDaySet keeps 田中', set2['田中'], true);
+    assertEqual_('buildAllDaySet keeps 鈴木', set2['鈴木'], true);
+
+    // 空配列
+    var set3 = ExclusionService.buildAllDaySet([]);
+    assertDeepEqual_('buildAllDaySet empty array', set3, {});
+  });
+
+  // addTimeRange
+  testGroup_('ExclusionService.addTimeRange', function () {
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTimeRange(excl, '山田', 600, 720);
+    assertEqual_('addTimeRange entry count', excl.timeRanges.length, 1);
+    assertEqual_('addTimeRange name', excl.timeRanges[0].name, '山田');
+    assertEqual_('addTimeRange startMin', excl.timeRanges[0].startMin, 600);
+    assertEqual_('addTimeRange endMin', excl.timeRanges[0].endMin, 720);
+
+    // startMin >= endMin でthrow
+    assertThrows_('addTimeRange startMin >= endMin', function () {
+      ExclusionService.addTimeRange(excl, '山田', 720, 600);
+    });
+    assertThrows_('addTimeRange startMin == endMin', function () {
+      ExclusionService.addTimeRange(excl, '山田', 600, 600);
+    });
+    // 空名前でthrow
+    assertThrows_('addTimeRange empty name', function () {
+      ExclusionService.addTimeRange(excl, '', 600, 720);
+    });
+  });
+
+  // addTournament
+  testGroup_('ExclusionService.addTournament', function () {
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTournament(excl, '鈴木', 750, 900);
+    assertEqual_('addTournament entry count', excl.tournaments.length, 1);
+    assertEqual_('addTournament name', excl.tournaments[0].name, '鈴木');
+
+    // バリデーション
+    assertThrows_('addTournament startMin >= endMin', function () {
+      ExclusionService.addTournament(excl, '鈴木', 900, 750);
+    });
+  });
+
+  // isExcluded: allDay
+  testGroup_('ExclusionService.isExcluded allDay', function () {
+    var excl = ExclusionService.createEmpty();
+    excl.allDay = ExclusionService.buildAllDaySet(['田中']);
+
+    assertEqual_('allDay: 田中 at 600', ExclusionService.isExcluded(excl, '田中', 600), true);
+    assertEqual_('allDay: 田中 at 0', ExclusionService.isExcluded(excl, '田中', 0), true);
+    assertEqual_('allDay: 田中 at 1400', ExclusionService.isExcluded(excl, '田中', 1400), true);
+    assertEqual_('allDay: 佐藤 not excluded', ExclusionService.isExcluded(excl, '佐藤', 600), false);
+  });
+
+  // isExcluded: timeRange
+  testGroup_('ExclusionService.isExcluded timeRange', function () {
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTimeRange(excl, '山田', 600, 720);
+
+    assertEqual_('timeRange: 山田 at 600 (start)', ExclusionService.isExcluded(excl, '山田', 600), true);
+    assertEqual_('timeRange: 山田 at 660 (mid)', ExclusionService.isExcluded(excl, '山田', 660), true);
+    assertEqual_('timeRange: 山田 at 719 (end-1)', ExclusionService.isExcluded(excl, '山田', 719), true);
+    assertEqual_('timeRange: 山田 at 720 (end, half-open)', ExclusionService.isExcluded(excl, '山田', 720), false);
+    assertEqual_('timeRange: 山田 at 599 (before)', ExclusionService.isExcluded(excl, '山田', 599), false);
+    assertEqual_('timeRange: 佐藤 not excluded', ExclusionService.isExcluded(excl, '佐藤', 660), false);
+  });
+
+  // isExcluded: tournament
+  testGroup_('ExclusionService.isExcluded tournament', function () {
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTournament(excl, '鈴木', 750, 900);
+
+    assertEqual_('tournament: 鈴木 at 750 (start)', ExclusionService.isExcluded(excl, '鈴木', 750), true);
+    assertEqual_('tournament: 鈴木 at 800 (mid)', ExclusionService.isExcluded(excl, '鈴木', 800), true);
+    assertEqual_('tournament: 鈴木 at 900 (end, half-open)', ExclusionService.isExcluded(excl, '鈴木', 900), false);
+    assertEqual_('tournament: 鈴木 at 749 (before)', ExclusionService.isExcluded(excl, '鈴木', 749), false);
+  });
+
+  // isExcludedDetail
+  testGroup_('ExclusionService.isExcludedDetail', function () {
+    var excl = ExclusionService.createEmpty();
+    excl.allDay = ExclusionService.buildAllDaySet(['田中']);
+    ExclusionService.addTimeRange(excl, '山田', 600, 720);
+    ExclusionService.addTournament(excl, '鈴木', 750, 900);
+
+    var r1 = ExclusionService.isExcludedDetail(excl, '田中', 600);
+    assertEqual_('detail allDay excluded', r1.excluded, true);
+    assertEqual_('detail allDay reason', r1.reason, 'allDay');
+
+    var r2 = ExclusionService.isExcludedDetail(excl, '山田', 660);
+    assertEqual_('detail timeRange excluded', r2.excluded, true);
+    assertEqual_('detail timeRange reason', r2.reason, 'timeRange');
+
+    var r3 = ExclusionService.isExcludedDetail(excl, '鈴木', 800);
+    assertEqual_('detail tournament excluded', r3.excluded, true);
+    assertEqual_('detail tournament reason', r3.reason, 'tournament');
+
+    var r4 = ExclusionService.isExcludedDetail(excl, '佐藤', 600);
+    assertEqual_('detail not excluded', r4.excluded, false);
+    assertEqual_('detail no reason', r4.reason, '');
+  });
+
+  // 優先度: allDayがtournament/timeRangeより優先
+  testGroup_('ExclusionService priority', function () {
+    var excl = ExclusionService.createEmpty();
+    excl.allDay = ExclusionService.buildAllDaySet(['田中']);
+    ExclusionService.addTournament(excl, '田中', 750, 900);
+    ExclusionService.addTimeRange(excl, '田中', 600, 720);
+
+    var r = ExclusionService.isExcludedDetail(excl, '田中', 800);
+    assertEqual_('priority: allDay over tournament', r.reason, 'allDay');
+
+    // tournament > timeRange
+    var excl2 = ExclusionService.createEmpty();
+    ExclusionService.addTournament(excl2, '山田', 600, 720);
+    ExclusionService.addTimeRange(excl2, '山田', 600, 720);
+
+    var r2 = ExclusionService.isExcludedDetail(excl2, '山田', 660);
+    assertEqual_('priority: tournament over timeRange', r2.reason, 'tournament');
+  });
+
+  // isTournament
+  testGroup_('ExclusionService.isTournament', function () {
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTournament(excl, '鈴木', 750, 900);
+
+    assertEqual_('isTournament: 鈴木 at 800', ExclusionService.isTournament(excl, '鈴木', 800), true);
+    assertEqual_('isTournament: 鈴木 at 900 (end)', ExclusionService.isTournament(excl, '鈴木', 900), false);
+    assertEqual_('isTournament: 佐藤', ExclusionService.isTournament(excl, '佐藤', 800), false);
+  });
+
+  // isAllDay
+  testGroup_('ExclusionService.isAllDay', function () {
+    var excl = ExclusionService.createEmpty();
+    excl.allDay = ExclusionService.buildAllDaySet(['田中']);
+
+    assertEqual_('isAllDay: 田中', ExclusionService.isAllDay(excl, '田中'), true);
+    assertEqual_('isAllDay: 佐藤', ExclusionService.isAllDay(excl, '佐藤'), false);
+  });
+
+  // 複数エントリ
+  testGroup_('ExclusionService multiple entries', function () {
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTimeRange(excl, '山田', 600, 720);
+    ExclusionService.addTimeRange(excl, '山田', 840, 960);
+    ExclusionService.addTournament(excl, '鈴木', 600, 720);
+    ExclusionService.addTournament(excl, '鈴木', 840, 960);
+
+    // 山田: 1つ目の区間
+    assertEqual_('multi timeRange: 山田 at 660', ExclusionService.isExcluded(excl, '山田', 660), true);
+    // 山田: 隙間（区間外）
+    assertEqual_('multi timeRange: 山田 at 780 (gap)', ExclusionService.isExcluded(excl, '山田', 780), false);
+    // 山田: 2つ目の区間
+    assertEqual_('multi timeRange: 山田 at 900', ExclusionService.isExcluded(excl, '山田', 900), true);
+
+    // 鈴木: 複数大会
+    assertEqual_('multi tournament: 鈴木 at 660', ExclusionService.isTournament(excl, '鈴木', 660), true);
+    assertEqual_('multi tournament: 鈴木 at 780 (gap)', ExclusionService.isTournament(excl, '鈴木', 780), false);
+    assertEqual_('multi tournament: 鈴木 at 900', ExclusionService.isTournament(excl, '鈴木', 900), true);
+  });
+
+  // validate_
+  testGroup_('ExclusionService.validate_', function () {
+    // 正常構造
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTimeRange(excl, '山田', 600, 720);
+    ExclusionService.validate_(excl); // should not throw
+    testResults_.passed++;
+
+    // 不正構造
+    assertThrows_('validate_ null', function () {
+      ExclusionService.validate_(null);
+    });
+    assertThrows_('validate_ missing allDay', function () {
+      ExclusionService.validate_({ timeRanges: [], tournaments: [] });
+    });
+    assertThrows_('validate_ allDay not object', function () {
+      ExclusionService.validate_({ allDay: 'bad', timeRanges: [], tournaments: [] });
+    });
+    assertThrows_('validate_ timeRanges not array', function () {
+      ExclusionService.validate_({ allDay: {}, timeRanges: 'bad', tournaments: [] });
+    });
+    assertThrows_('validate_ tournaments not array', function () {
+      ExclusionService.validate_({ allDay: {}, timeRanges: [], tournaments: 'bad' });
+    });
+    assertThrows_('validate_ invalid entry in timeRanges', function () {
+      ExclusionService.validate_({ allDay: {}, timeRanges: [{ name: '', startMin: 0, endMin: 100 }], tournaments: [] });
+    });
+    assertThrows_('validate_ startMin >= endMin in entry', function () {
+      ExclusionService.validate_({ allDay: {}, timeRanges: [{ name: '田中', startMin: 100, endMin: 50 }], tournaments: [] });
+    });
   });
 }
