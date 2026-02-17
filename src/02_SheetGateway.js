@@ -158,6 +158,16 @@ var SheetGateway = (function () {
   }
 
   /**
+   * シート末尾に1行追記する
+   * @param {string} sheetName - シート名
+   * @param {Array<*>} rowArray - 1次元配列
+   */
+  function appendRow(sheetName, rowArray) {
+    var sheet = getSheet(sheetName);
+    sheet.appendRow(rowArray);
+  }
+
+  /**
    * シートが存在すれば削除する（再生成時のクリーンアップ用）
    * @param {string} name - シート名
    */
@@ -176,6 +186,7 @@ var SheetGateway = (function () {
     setValues: setValues,
     detectPosts: detectPosts,
     getTimeRows: getTimeRows,
+    appendRow: appendRow,
     copyTemplate: copyTemplate,
     deleteSheetIfExists: deleteSheetIfExists
   };
