@@ -112,3 +112,14 @@
  * @property {number}   breakAtMin - 休憩開始時刻（分）
  * @property {string[]} names      - 休憩者名リスト
  */
+
+/**
+ * 配置結果エントリ
+ * @typedef {Object} Placement
+ * @property {number}          slotIndex - コマインデックス（0始まり）
+ * @property {number}          timeMin   - 配置時刻（分）
+ * @property {number}          rowNumber - テンプレート行番号
+ * @property {string}          postName  - 持ち場名
+ * @property {string}          staffName - スタッフ名
+ * @property {"auto"|"carry"}  source    - 配置ソース
+ */
