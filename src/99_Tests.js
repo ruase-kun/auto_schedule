@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1~6+1.5 テストスイート
+ * 99_Tests.js — Phase 1~6+1.5+4.5 テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1~6+1.5 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1~6+1.5+4.5 テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,7 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1~6+1.5 テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1~6+1.5+4.5 テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -168,6 +168,9 @@ function runAllPhase1Tests() {
   // Phase 1.5 純粋テスト
   testDepartmentServicePure_();
 
+  // Phase 4.5 純粋テスト
+  testWaveServicePure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -177,7 +180,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1~6+1.5 テスト結果 ===\n' +
+    '=== Phase 1~6+1.5+4.5 テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -192,11 +195,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1~6+1.5 テスト結果',
+      ui.alert('Phase 1~6+1.5+4.5 テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1~6+1.5 テスト結果',
+      ui.alert('Phase 1~6+1.5+4.5 テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -2328,5 +2331,172 @@ function testDepartmentServicePure_() {
     // #18 空配列
     assertEqual_('getProfileByName: 空配列',
       DepartmentService.getProfileByName([], '販売'), null);
+  });
+}
+
+/* ---------- WaveService テスト (Phase 4.5) ---------- */
+
+function testWaveServicePure_() {
+  testGroup_('WaveService.parseTimeValue_', function () {
+    // #1 文字列 "9:00"
+    assertEqual_('parseTimeValue_: "9:00"',
+      WaveService.parseTimeValue_('9:00'), 540);
+
+    // #2 文字列 "13:30"
+    assertEqual_('parseTimeValue_: "13:30"',
+      WaveService.parseTimeValue_('13:30'), 810);
+
+    // #3 Date型
+    assertEqual_('parseTimeValue_: Date(10:30)',
+      WaveService.parseTimeValue_(new Date(2026, 0, 1, 10, 30)), 630);
+  });
+
+  testGroup_('WaveService.parseTaskRow_', function () {
+    // #4 基本行
+    var row4 = ['平日3陣', 1, 'ピック', '9:00', '10:30'];
+    assertDeepEqual_('parseTaskRow_: 基本行',
+      WaveService.parseTaskRow_(row4, 0),
+      { templateName: '平日3陣', waveNumber: 1, process: 'ピック', startMin: 540, endMin: 630 });
+
+    // #5 Date型時刻
+    var row5 = ['平日2陣', 2, '梱包', new Date(2026, 0, 1, 14, 0), new Date(2026, 0, 1, 16, 0)];
+    assertDeepEqual_('parseTaskRow_: Date型時刻',
+      WaveService.parseTaskRow_(row5, 1),
+      { templateName: '平日2陣', waveNumber: 2, process: '梱包', startMin: 840, endMin: 960 });
+  });
+
+  testGroup_('WaveService.validateTask_', function () {
+    // #6 正常ケース
+    var validTask = { templateName: '平日3陣', waveNumber: 1, process: 'ピック', startMin: 540, endMin: 630 };
+    assertTrue_('validateTask_: 正常', (function () {
+      WaveService.validateTask_(validTask, 0);
+      return true;
+    })());
+
+    // #7 process空
+    assertThrows_('validateTask_: process空', function () {
+      WaveService.validateTask_(
+        { templateName: '平日3陣', waveNumber: 1, process: '', startMin: 540, endMin: 630 }, 0);
+    });
+
+    // #8 waveNumber=0
+    assertThrows_('validateTask_: waveNumber=0', function () {
+      WaveService.validateTask_(
+        { templateName: '平日3陣', waveNumber: 0, process: 'ピック', startMin: 540, endMin: 630 }, 0);
+    });
+
+    // #9 waveNumber小数
+    assertThrows_('validateTask_: waveNumber小数', function () {
+      WaveService.validateTask_(
+        { templateName: '平日3陣', waveNumber: 1.5, process: 'ピック', startMin: 540, endMin: 630 }, 0);
+    });
+
+    // #10 開始>=終了
+    assertThrows_('validateTask_: 開始>=終了', function () {
+      WaveService.validateTask_(
+        { templateName: '平日3陣', waveNumber: 1, process: 'ピック', startMin: 630, endMin: 540 }, 0);
+    });
+  });
+
+  testGroup_('WaveService.groupByTemplate_', function () {
+    // #11 1テンプレート2陣
+    var tasks11 = [
+      { templateName: '平日3陣', waveNumber: 1, process: 'ピック', startMin: 540, endMin: 630 },
+      { templateName: '平日3陣', waveNumber: 1, process: '梱包', startMin: 630, endMin: 720 },
+      { templateName: '平日3陣', waveNumber: 2, process: 'ピック', startMin: 780, endMin: 870 }
+    ];
+    var result11 = WaveService.groupByTemplate_(tasks11);
+    assertDeepEqual_('groupByTemplate_: 1テンプレート2陣', result11, [{
+      templateName: '平日3陣',
+      waves: [
+        { waveNumber: 1, tasks: [
+          { process: 'ピック', startMin: 540, endMin: 630, assignedStaff: [] },
+          { process: '梱包', startMin: 630, endMin: 720, assignedStaff: [] }
+        ]},
+        { waveNumber: 2, tasks: [
+          { process: 'ピック', startMin: 780, endMin: 870, assignedStaff: [] }
+        ]}
+      ]
+    }]);
+
+    // #12 2テンプレート
+    var tasks12 = [
+      { templateName: '平日3陣', waveNumber: 1, process: 'ピック', startMin: 540, endMin: 630 },
+      { templateName: '平日2陣', waveNumber: 1, process: 'ピック', startMin: 540, endMin: 660 }
+    ];
+    var result12 = WaveService.groupByTemplate_(tasks12);
+    assertEqual_('groupByTemplate_: 2テンプレート', result12.length, 2);
+
+    // #13 陣番号ソート（逆順入力でもソートされる）
+    var tasks13 = [
+      { templateName: 'テスト', waveNumber: 3, process: 'ピック', startMin: 960, endMin: 1080 },
+      { templateName: 'テスト', waveNumber: 1, process: 'ピック', startMin: 540, endMin: 630 },
+      { templateName: 'テスト', waveNumber: 2, process: 'ピック', startMin: 780, endMin: 870 }
+    ];
+    var result13 = WaveService.groupByTemplate_(tasks13);
+    assertEqual_('groupByTemplate_: 陣番号ソート wave[0]', result13[0].waves[0].waveNumber, 1);
+    assertEqual_('groupByTemplate_: 陣番号ソート wave[1]', result13[0].waves[1].waveNumber, 2);
+    assertEqual_('groupByTemplate_: 陣番号ソート wave[2]', result13[0].waves[2].waveNumber, 3);
+  });
+
+  testGroup_('WaveService.getTemplateByName', function () {
+    var templates = [
+      { templateName: '平日3陣', waves: [] },
+      { templateName: '平日2陣', waves: [] }
+    ];
+
+    // #14 見つかる
+    assertEqual_('getTemplateByName: 見つかる',
+      WaveService.getTemplateByName(templates, '平日2陣').templateName, '平日2陣');
+
+    // #15 見つからない
+    assertEqual_('getTemplateByName: 見つからない',
+      WaveService.getTemplateByName(templates, '不存在'), null);
+  });
+
+  testGroup_('WaveService.buildWavesJson', function () {
+    // #16 基本
+    var waves16 = [{
+      waveNumber: 1,
+      tasks: [
+        { process: 'ピック', startMin: 540, endMin: 630, assignedStaff: [] }
+      ]
+    }];
+    assertDeepEqual_('buildWavesJson: 基本',
+      WaveService.buildWavesJson(waves16),
+      [{ waveNumber: 1, tasks: [{ process: 'ピック', start: '9:00', end: '10:30', staff: [] }] }]);
+
+    // #17 複数陣
+    var waves17 = [
+      { waveNumber: 1, tasks: [
+        { process: 'ピック', startMin: 540, endMin: 630, assignedStaff: [] },
+        { process: '梱包', startMin: 630, endMin: 720, assignedStaff: [] }
+      ]},
+      { waveNumber: 2, tasks: [
+        { process: 'ピック', startMin: 780, endMin: 870, assignedStaff: [] }
+      ]}
+    ];
+    assertDeepEqual_('buildWavesJson: 複数陣',
+      WaveService.buildWavesJson(waves17),
+      [
+        { waveNumber: 1, tasks: [
+          { process: 'ピック', start: '9:00', end: '10:30', staff: [] },
+          { process: '梱包', start: '10:30', end: '12:00', staff: [] }
+        ]},
+        { waveNumber: 2, tasks: [
+          { process: 'ピック', start: '13:00', end: '14:30', staff: [] }
+        ]}
+      ]);
+
+    // #18 assignedStaff付き
+    var waves18 = [{
+      waveNumber: 1,
+      tasks: [
+        { process: 'ピック', startMin: 540, endMin: 630, assignedStaff: ['田中', '鈴木'] }
+      ]
+    }];
+    assertDeepEqual_('buildWavesJson: assignedStaff付き',
+      WaveService.buildWavesJson(waves18),
+      [{ waveNumber: 1, tasks: [{ process: 'ピック', start: '9:00', end: '10:30', staff: ['田中', '鈴木'] }] }]);
   });
 }
