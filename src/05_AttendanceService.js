@@ -145,9 +145,12 @@ var AttendanceService = (function () {
       };
     }
 
+    // 全角文字を正規化してから時差シフトを判定
+    var normalized = TimeUtils.normalizeToHalfWidth(shiftRaw);
+
     // 時差シフト: "H:MM-HH:MM" パターン (V5)
-    if (shiftRaw.indexOf('-') !== -1 && shiftRaw.indexOf(':') !== -1) {
-      var range = TimeUtils.parseShiftRange(shiftRaw);
+    if (normalized.indexOf('-') !== -1 && normalized.indexOf(':') !== -1) {
+      var range = TimeUtils.parseShiftRange(normalized);
       return {
         shiftType: '時差',
         startMin: range.startMin,
@@ -155,7 +158,6 @@ var AttendanceService = (function () {
       };
     }
 
-    // その他 → 時差として扱おうとするが失敗する可能性
     throw new Error(
       'AttendanceService: 不明なシフト種別です: ' + shiftRaw
     );

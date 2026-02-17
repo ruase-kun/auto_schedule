@@ -9,6 +9,21 @@ var TimeUtils = (function () {
   'use strict';
 
   /**
+   * 全角記号・数字を半角に正規化する
+   * ｰ(U+FF70長音)・−(U+2212)・ー(U+30FC)→ -, ：→ :, ０-９→ 0-9
+   * @param {string} str
+   * @returns {string}
+   */
+  function normalizeToHalfWidth(str) {
+    return str
+      .replace(/[\uff70\u2212\u30fc\uff0d\u2013\u2014]/g, '-')  // 各種ダッシュ・長音→半角ハイフン
+      .replace(/\uff1a/g, ':')                                     // ：→:
+      .replace(/[\uff10-\uff19]/g, function (ch) {                 // ０-９→0-9
+        return String.fromCharCode(ch.charCodeAt(0) - 0xff10 + 0x30);
+      });
+  }
+
+  /**
    * 時刻文字列を分に変換する
    * @param {string} str - "H:MM" or "HH:MM"
    * @returns {number} 分（例: "9:30" → 570）
@@ -18,7 +33,7 @@ var TimeUtils = (function () {
     if (typeof str !== 'string' || str.trim() === '') {
       throw new Error('parseTimeToMin: 空または非文字列が渡されました: ' + str);
     }
-    var parts = str.trim().split(':');
+    var parts = normalizeToHalfWidth(str.trim()).split(':');
     if (parts.length !== 2) {
       throw new Error('parseTimeToMin: 不正な時刻形式です: ' + str);
     }
@@ -54,7 +69,8 @@ var TimeUtils = (function () {
     if (typeof str !== 'string' || str.trim() === '') {
       throw new Error('parseShiftRange: 空または非文字列が渡されました: ' + str);
     }
-    var parts = str.trim().split('-');
+    var normalized = normalizeToHalfWidth(str.trim());
+    var parts = normalized.split('-');
     if (parts.length !== 2) {
       throw new Error('parseShiftRange: 不正な範囲形式です: ' + str);
     }
@@ -69,6 +85,7 @@ var TimeUtils = (function () {
   return {
     parseTimeToMin: parseTimeToMin,
     minToTimeStr: minToTimeStr,
-    parseShiftRange: parseShiftRange
+    parseShiftRange: parseShiftRange,
+    normalizeToHalfWidth: normalizeToHalfWidth
   };
 })();

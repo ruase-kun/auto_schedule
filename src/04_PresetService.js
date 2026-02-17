@@ -30,23 +30,21 @@ var PresetService = (function () {
       if (postName === '') continue;
 
       var enabled = parseEnabled_(row[1]);
-      var requiredLv = parseInt(row[2], 10);
+      var requiredLv = parseLevelValue_(row[2]);
       var order = parseInt(row[3], 10);
       var sortDir = parseSortDir_(row[4]);
       var concurrentPost = parseConcurrentPost_(row[5]);
       var activeWindows = parseActiveWindows_(row[6]);
 
+      // 決定順序または必要Lvが未設定 → 自動配置対象外としてスキップ
+      if (isNaN(order) || order < 1) continue;
+      if (isNaN(requiredLv) || requiredLv < 1) continue;
+
       // バリデーション: 必要Lv 1〜4 (V2)
-      if (isNaN(requiredLv) || requiredLv < 1 || requiredLv > 4) {
+      if (requiredLv > 4) {
         throw new Error(
           'PresetService: 必要Lvが1〜4の範囲外です (V2): ' +
             postName + ' → ' + row[2]
-        );
-      }
-
-      if (isNaN(order) || order < 1) {
-        throw new Error(
-          'PresetService: 決定順序が不正です: ' + postName + ' → ' + row[3]
         );
       }
 
@@ -79,6 +77,21 @@ var PresetService = (function () {
     if (typeof value === 'boolean') return value;
     var s = String(value).trim().toLowerCase();
     return s === 'true' || s === '○' || s === '有効' || s === 'yes' || s === '1';
+  }
+
+  /**
+   * レベル値をパースする（内部）
+   * "Lv.1", "Lv1", "1", 1 → 1
+   * @param {*} value
+   * @returns {number} NaN if unparseable
+   */
+  function parseLevelValue_(value) {
+    if (typeof value === 'number') return value;
+    var s = String(value).trim();
+    // "Lv.1", "Lv1", "lv.2" 等からnumber部分を抽出
+    var m = s.match(/(\d+)/);
+    if (m) return parseInt(m[1], 10);
+    return NaN;
   }
 
   /**
@@ -117,7 +130,11 @@ var PresetService = (function () {
     var s = String(value).trim();
     if (s === '') return [];
 
-    var parts = s.split(',');
+    // 時刻パターンを含まない値は非時間帯としてスキップ（ヘッダー行混入対策）
+    var normalized = TimeUtils.normalizeToHalfWidth(s);
+    if (normalized.indexOf(':') === -1) return [];
+
+    var parts = normalized.split(',');
     var windows = [];
     for (var i = 0; i < parts.length; i++) {
       var range = parts[i].trim();
