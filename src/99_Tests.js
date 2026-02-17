@@ -227,6 +227,25 @@ function testTimeUtils_() {
       { startMin: 480, endMin: 1020 }
     );
 
+    // parseShiftRange 全角文字対応
+    assertDeepEqual_(
+      'parseShiftRange with fullwidth dash "15:00\uff7022:00"',
+      TimeUtils.parseShiftRange('15:00\uff7022:00'),
+      { startMin: 900, endMin: 1320 }
+    );
+    assertDeepEqual_(
+      'parseShiftRange with fullwidth colon "15\uff1a00-22\uff1a00"',
+      TimeUtils.parseShiftRange('15\uff1a00-22\uff1a00'),
+      { startMin: 900, endMin: 1320 }
+    );
+
+    // normalizeToHalfWidth
+    assertEqual_(
+      'normalizeToHalfWidth fullwidth dash',
+      TimeUtils.normalizeToHalfWidth('15:00\uff7022:00'),
+      '15:00-22:00'
+    );
+
     // parseShiftRange エラー系
     assertThrows_('parseShiftRange("")', function () { TimeUtils.parseShiftRange(''); });
     assertThrows_('parseShiftRange("16:00-9:00")', function () {
@@ -289,6 +308,11 @@ function testPresetServicePure_() {
     assertDeepEqual_(
       'parseActiveWindows_ null',
       PresetService.parseActiveWindows_(null),
+      []
+    );
+    assertDeepEqual_(
+      'parseActiveWindows_ non-time value "項目"',
+      PresetService.parseActiveWindows_('項目'),
       []
     );
   });
