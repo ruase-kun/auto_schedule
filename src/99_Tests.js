@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1+2+3+4 テストスイート
+ * 99_Tests.js — Phase 1+2+3+4+5 テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1+2+3+4 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1+2+3+4+5 テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,7 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1+2+3+4 テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1+2+3+4+5 テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -159,6 +159,9 @@ function runAllPhase1Tests() {
   // Phase 4 純粋テスト
   testPlacementEnginePure_();
 
+  // Phase 5 純粋テスト
+  testTimelineServicePure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -168,7 +171,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1+2+3+4 テスト結果 ===\n' +
+    '=== Phase 1+2+3+4+5 テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -183,11 +186,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1+2+3+4 テスト結果',
+      ui.alert('Phase 1+2+3+4+5 テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1+2+3+4 テスト結果',
+      ui.alert('Phase 1+2+3+4+5 テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -1675,5 +1678,268 @@ function testPlacementEnginePure_() {
     }, rng0_);
 
     assertEqual_('disabled: 0件', result.length, 0);
+  });
+}
+
+/* ---------- TimelineService 純粋テスト ---------- */
+
+function testTimelineServicePure_() {
+
+  // ヘルパー: テスト用Staff生成
+  function mkStaff_(name, startMin, endMin) {
+    return {
+      name: name,
+      employment: '社員',
+      shiftType: '午前',
+      shiftStartMin: startMin,
+      shiftEndMin: endMin
+    };
+  }
+
+  // --- isWorking_ テスト ---
+
+  // #1: 勤務開始ちょうど → true
+  testGroup_('TL: isWorking_ 勤務開始ちょうど', function () {
+    var staff = mkStaff_('田中', 570, 1080);
+    assertEqual_('開始ちょうど→true', TimelineService.isWorking_(staff, 570), true);
+  });
+
+  // #2: 勤務終了-30 → true（境界）
+  testGroup_('TL: isWorking_ 勤務終了-30', function () {
+    var staff = mkStaff_('田中', 570, 1080);
+    assertEqual_('終了-30→true', TimelineService.isWorking_(staff, 1050), true);
+  });
+
+  // #3: 勤務終了-29 → false
+  testGroup_('TL: isWorking_ 勤務終了-29', function () {
+    var staff = mkStaff_('田中', 570, 1080);
+    assertEqual_('終了-29→false', TimelineService.isWorking_(staff, 1051), false);
+  });
+
+  // #4: 勤務時間前 → false
+  testGroup_('TL: isWorking_ 勤務時間前', function () {
+    var staff = mkStaff_('田中', 570, 1080);
+    assertEqual_('開始前→false', TimelineService.isWorking_(staff, 569), false);
+  });
+
+  // --- buildPlacementLookup_ テスト ---
+
+  // #5: 基本
+  testGroup_('TL: buildPlacementLookup_ 基本', function () {
+    var placements = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' }
+    ];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+
+    var lookup = TimelineService.buildPlacementLookup_(placements, timeRows);
+    assertDeepEqual_('基本逆引き', lookup[600]['田中'], ['レジ1']);
+  });
+
+  // #6: 同一時刻複数持ち場（carry）
+  testGroup_('TL: buildPlacementLookup_ carry', function () {
+    var placements = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' },
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: '加工1', staffName: '田中', source: 'carry' }
+    ];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+
+    var lookup = TimelineService.buildPlacementLookup_(placements, timeRows);
+    assertDeepEqual_('carry逆引き', lookup[600]['田中'], ['レジ1', '加工1']);
+  });
+
+  // --- buildMatrix テスト ---
+
+  // ヘルパー: 空除外情報
+  function emptyExcl_() {
+    return ExclusionService.createEmpty();
+  }
+
+  // #7: 大会優先 → "大会"
+  testGroup_('TL: buildMatrix 大会優先', function () {
+    var staff = [mkStaff_('田中', 570, 1080)];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+    var placements = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' }
+    ];
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTournament(excl, '田中', 550, 700);
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: placements,
+      breakAssignments: [], breakDuration: 60,
+      exclusions: excl, timeRows: timeRows
+    });
+
+    assertEqual_('大会優先', matrix[1][1], '大会');
+  });
+
+  // #8: 休憩優先 → "休憩"
+  testGroup_('TL: buildMatrix 休憩優先', function () {
+    var staff = [mkStaff_('田中', 570, 1080)];
+    var timeRows = [{ rowNumber: 3, timeMin: 840, timeStr: '14:00' }];
+    var placements = [
+      { slotIndex: 0, timeMin: 840, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' }
+    ];
+    var breakAssignments = [{ breakAtMin: 840, names: ['田中'] }];
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: placements,
+      breakAssignments: breakAssignments, breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertEqual_('休憩優先', matrix[1][1], '休憩');
+  });
+
+  // #9: 配置あり → 持ち場名
+  testGroup_('TL: buildMatrix 配置あり', function () {
+    var staff = [mkStaff_('田中', 570, 1080)];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+    var placements = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' }
+    ];
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: placements,
+      breakAssignments: [], breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertEqual_('配置あり', matrix[1][1], 'レジ1');
+  });
+
+  // #10: 配置複数（carry）→ "/" 区切り
+  testGroup_('TL: buildMatrix 配置複数carry', function () {
+    var staff = [mkStaff_('田中', 570, 1080)];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+    var placements = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' },
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: '加工1', staffName: '田中', source: 'carry' }
+    ];
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: placements,
+      breakAssignments: [], breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertEqual_('carry "/" 区切り', matrix[1][1], 'レジ1/加工1');
+  });
+
+  // #11: 浮き → 勤務中&配置なし
+  testGroup_('TL: buildMatrix 浮き', function () {
+    var staff = [mkStaff_('田中', 570, 1080)];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: [],
+      breakAssignments: [], breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertEqual_('浮き', matrix[1][1], '浮き');
+  });
+
+  // #12: 勤務外 → 空欄
+  testGroup_('TL: buildMatrix 勤務外', function () {
+    var staff = [mkStaff_('田中', 780, 1320)]; // 13:00開始
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }]; // 10:00
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: [],
+      breakAssignments: [], breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertEqual_('勤務外→空欄', matrix[1][1], '');
+  });
+
+  // #13: 優先順位（大会 > 休憩 > 配置 > 浮き）
+  testGroup_('TL: buildMatrix 優先順位', function () {
+    var staff = [mkStaff_('田中', 570, 1080)];
+    var timeRows = [{ rowNumber: 3, timeMin: 840, timeStr: '14:00' }];
+    var placements = [
+      { slotIndex: 0, timeMin: 840, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' }
+    ];
+    var breakAssignments = [{ breakAtMin: 840, names: ['田中'] }];
+    var excl = ExclusionService.createEmpty();
+    ExclusionService.addTournament(excl, '田中', 800, 900);
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: placements,
+      breakAssignments: breakAssignments, breakDuration: 60,
+      exclusions: excl, timeRows: timeRows
+    });
+
+    // 大会 > 休憩 > 配置 → "大会" が勝つ
+    assertEqual_('優先順位: 大会が勝つ', matrix[1][1], '大会');
+  });
+
+  // #14: ヘッダー行
+  testGroup_('TL: buildMatrix ヘッダー行', function () {
+    var staff = [mkStaff_('田中', 570, 1080), mkStaff_('山田', 780, 1320)];
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staff, placements: [],
+      breakAssignments: [], breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertDeepEqual_('ヘッダー行', matrix[0], ['時間', '田中', '山田']);
+  });
+
+  // #15: 空スタッフ → ヘッダー1列のみ
+  testGroup_('TL: buildMatrix 空スタッフ', function () {
+    var timeRows = [{ rowNumber: 3, timeMin: 600, timeStr: '10:00' }];
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: [], placements: [],
+      breakAssignments: [], breakDuration: 60,
+      exclusions: emptyExcl_(), timeRows: timeRows
+    });
+
+    assertDeepEqual_('空スタッフ ヘッダー', matrix[0], ['時間']);
+    assertDeepEqual_('空スタッフ データ行', matrix[1], ['10:00']);
+  });
+
+  // #16: 基本統合 — 2人×3行の完全マトリクス（plan検証例）
+  testGroup_('TL: buildMatrix 基本統合', function () {
+    var staffList = [
+      mkStaff_('田中', 570, 1080),
+      mkStaff_('山田', 780, 1320)
+    ];
+    var timeRows = [
+      { rowNumber: 3, timeMin: 600, timeStr: '10:00' },
+      { rowNumber: 6, timeMin: 690, timeStr: '11:30' },
+      { rowNumber: 9, timeMin: 780, timeStr: '13:00' }
+    ];
+    var placements = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '田中', source: 'auto' },
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: '加工1', staffName: '田中', source: 'carry' }
+    ];
+    var breakAssignments = [{ breakAtMin: 780, names: ['田中'] }];
+    var exclusions = ExclusionService.createEmpty();
+
+    var matrix = TimelineService.buildMatrix({
+      staffList: staffList, placements: placements,
+      breakAssignments: breakAssignments, breakDuration: 60,
+      exclusions: exclusions, timeRows: timeRows
+    });
+
+    // ヘッダー
+    assertDeepEqual_('統合: ヘッダー', matrix[0], ['時間', '田中', '山田']);
+
+    // 10:00 — 田中:配置2持ち場, 山田:勤務外(780開始)
+    assertEqual_('統合: 10:00 田中', matrix[1][1], 'レジ1/加工1');
+    assertEqual_('統合: 10:00 山田', matrix[1][2], '');
+
+    // 11:30 — 田中:勤務中&配置なし, 山田:勤務外
+    assertEqual_('統合: 11:30 田中', matrix[2][1], '浮き');
+    assertEqual_('統合: 11:30 山田', matrix[2][2], '');
+
+    // 13:00 — 田中:休憩, 山田:勤務中&配置なし
+    assertEqual_('統合: 13:00 田中', matrix[3][1], '休憩');
+    assertEqual_('統合: 13:00 山田', matrix[3][2], '浮き');
   });
 }
