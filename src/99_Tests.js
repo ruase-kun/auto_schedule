@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1+2 テストスイート
+ * 99_Tests.js — Phase 1+2+3 テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1+2 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1+2+3 テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,7 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1+2 テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1+2+3 テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -153,6 +153,9 @@ function runAllPhase1Tests() {
   // Phase 2 純粋テスト
   testExclusionServicePure_();
 
+  // Phase 3 純粋テスト
+  testBreakServicePure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -162,7 +165,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1+2 テスト結果 ===\n' +
+    '=== Phase 1+2+3 テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -177,11 +180,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1+2 テスト結果',
+      ui.alert('Phase 1+2+3 テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1+2 テスト結果',
+      ui.alert('Phase 1+2+3 テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -778,5 +781,365 @@ function testExclusionServicePure_() {
     assertThrows_('validate_ startMin >= endMin in entry', function () {
       ExclusionService.validate_({ allDay: {}, timeRanges: [{ name: '田中', startMin: 100, endMin: 50 }], tournaments: [] });
     });
+  });
+}
+
+/* ---------- BreakService 純粋テスト ---------- */
+
+function testBreakServicePure_() {
+
+  // ヘルパー: テスト用Config生成
+  function makeConfig_() {
+    return {
+      breakTimes: {
+        amFirst: 840,   // 14:00
+        amSecond: 900,  // 15:00
+        pmFirst: 990,   // 16:30
+        pmSecond: 1050  // 17:30
+      },
+      breakDuration: 60
+    };
+  }
+
+  // ヘルパー: テスト用Staff生成
+  function makeStaff_(name, employment, shiftType) {
+    var shifts = {
+      '午前': { start: 570, end: 1080 },
+      '午後': { start: 780, end: 1320 },
+      '早朝': { start: 480, end: 1020 },
+      '時差': { start: 720, end: 1200 }
+    };
+    var s = shifts[shiftType] || { start: 570, end: 1080 };
+    return {
+      name: name,
+      employment: employment,
+      shiftType: shiftType,
+      shiftStartMin: s.start,
+      shiftEndMin: s.end
+    };
+  }
+
+  // --- isSocial_ ---
+  testGroup_('BreakService.isSocial_', function () {
+    assertEqual_('isSocial_ 社員', BreakService.isSocial_('社員'), true);
+    assertEqual_('isSocial_ 契約社員', BreakService.isSocial_('契約社員'), true);
+    assertEqual_('isSocial_ パート', BreakService.isSocial_('パート'), true);
+    assertEqual_('isSocial_ アルバイト', BreakService.isSocial_('アルバイト'), false);
+    assertEqual_('isSocial_ empty', BreakService.isSocial_(''), false);
+  });
+
+  // --- assignBreaks: 基本 ---
+  testGroup_('BreakService.assignBreaks 基本', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '午前'),
+      makeStaff_('山田', 'アルバイト', '午前'),
+      makeStaff_('鈴木', '社員', '午後'),
+      makeStaff_('佐藤', 'アルバイト', '午後')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    assertEqual_('基本: 4件', breaks.length, 4);
+    assertEqual_('基本: AM前半 breakAtMin', breaks[0].breakAtMin, 840);
+    assertEqual_('基本: AM後半 breakAtMin', breaks[1].breakAtMin, 900);
+    assertEqual_('基本: PM前半 breakAtMin', breaks[2].breakAtMin, 990);
+    assertEqual_('基本: PM後半 breakAtMin', breaks[3].breakAtMin, 1050);
+
+    // 社員1名+アルバイト1名 → 各系floor(1/2)=0名前半, 1名後半
+    // 田中(社員)→後半, 山田(アルバイト)→後半
+    assertEqual_('基本: AM前半 names length', breaks[0].names.length, 0);
+    assertEqual_('基本: AM後半 names length', breaks[1].names.length, 2);
+
+    // PM同様
+    assertEqual_('基本: PM前半 names length', breaks[2].names.length, 0);
+    assertEqual_('基本: PM後半 names length', breaks[3].names.length, 2);
+  });
+
+  // --- assignBreaks: 社員均等 ---
+  testGroup_('BreakService.assignBreaks 社員均等', function () {
+    var staff = [
+      makeStaff_('A田中', '社員', '午前'),
+      makeStaff_('B鈴木', '社員', '午前'),
+      makeStaff_('C佐藤', '社員', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 社員3名 → floor(3/2)=1名前半, 2名後半
+    assertEqual_('社員均等: AM前半 count', breaks[0].names.length, 1);
+    assertEqual_('社員均等: AM後半 count', breaks[1].names.length, 2);
+  });
+
+  // --- assignBreaks: アルバイト均等 ---
+  testGroup_('BreakService.assignBreaks アルバイト均等', function () {
+    var staff = [
+      makeStaff_('Aアルバ', 'アルバイト', '午前'),
+      makeStaff_('Bアルバ', 'アルバイト', '午前'),
+      makeStaff_('Cアルバ', 'アルバイト', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // アルバイト3名 → floor(3/2)=1名前半, 2名後半
+    assertEqual_('アルバイト均等: AM前半 count', breaks[0].names.length, 1);
+    assertEqual_('アルバイト均等: AM後半 count', breaks[1].names.length, 2);
+  });
+
+  // --- assignBreaks: 混合 ---
+  testGroup_('BreakService.assignBreaks 混合', function () {
+    var staff = [
+      makeStaff_('A社員1', '社員', '午前'),
+      makeStaff_('B社員2', '社員', '午前'),
+      makeStaff_('Cバイト1', 'アルバイト', '午前'),
+      makeStaff_('Dバイト2', 'アルバイト', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 社員2名 → floor(2/2)=1前半, 1後半
+    // アルバイト2名 → floor(2/2)=1前半, 1後半
+    // 合計: 前半2名, 後半2名
+    assertEqual_('混合: AM前半 count', breaks[0].names.length, 2);
+    assertEqual_('混合: AM後半 count', breaks[1].names.length, 2);
+  });
+
+  // --- assignBreaks: 早朝除外 ---
+  testGroup_('BreakService.assignBreaks 早朝除外', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '早朝'),
+      makeStaff_('山田', '社員', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 田中(早朝)は対象外 → AM午前に山田のみ
+    var allNames = breaks[0].names.concat(breaks[1].names);
+    assertTrue_('早朝除外: 田中が含まれない', allNames.indexOf('田中') === -1);
+    assertTrue_('早朝除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
+  });
+
+  // --- assignBreaks: 時差除外 ---
+  testGroup_('BreakService.assignBreaks 時差除外', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '時差'),
+      makeStaff_('山田', '社員', '午後')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 田中(時差)は対象外
+    var allNames = [];
+    for (var i = 0; i < breaks.length; i++) {
+      allNames = allNames.concat(breaks[i].names);
+    }
+    assertTrue_('時差除外: 田中が含まれない', allNames.indexOf('田中') === -1);
+    assertTrue_('時差除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
+  });
+
+  // --- assignBreaks: 終日除外 ---
+  testGroup_('BreakService.assignBreaks 終日除外', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '午前'),
+      makeStaff_('山田', '社員', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+    excl.allDay = ExclusionService.buildAllDaySet(['田中']);
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    var allNames = breaks[0].names.concat(breaks[1].names);
+    assertTrue_('終日除外: 田中が含まれない', allNames.indexOf('田中') === -1);
+    assertTrue_('終日除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
+  });
+
+  // --- assignBreaks: 大会除外 ---
+  testGroup_('BreakService.assignBreaks 大会除外', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '午前'),
+      makeStaff_('山田', '社員', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+    // 田中がAM前半(840)もAM後半(900)も大会中
+    ExclusionService.addTournament(excl, '田中', 800, 960);
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    var allNames = breaks[0].names.concat(breaks[1].names);
+    assertTrue_('大会除外: 田中が含まれない', allNames.indexOf('田中') === -1);
+    assertTrue_('大会除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
+  });
+
+  // --- assignBreaks: 大会片方のみ ---
+  testGroup_('BreakService.assignBreaks 大会片方のみ', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '午前'),
+      makeStaff_('山田', '社員', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+    // 田中がAM前半(840)のみ大会中（AM後半(900)は可能）
+    ExclusionService.addTournament(excl, '田中', 800, 870);
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 田中はfirstOnly不可 → secondOnlyに分類
+    assertTrue_('大会片方: 田中がAM前半に含まれない', breaks[0].names.indexOf('田中') === -1);
+    assertTrue_('大会片方: 田中がAM後半に含まれる', breaks[1].names.indexOf('田中') !== -1);
+  });
+
+  // --- assignBreaks: 空リスト ---
+  testGroup_('BreakService.assignBreaks 空リスト', function () {
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks([], config, excl);
+
+    assertEqual_('空リスト: 4件', breaks.length, 4);
+    assertEqual_('空リスト: AM前半 empty', breaks[0].names.length, 0);
+    assertEqual_('空リスト: AM後半 empty', breaks[1].names.length, 0);
+    assertEqual_('空リスト: PM前半 empty', breaks[2].names.length, 0);
+    assertEqual_('空リスト: PM後半 empty', breaks[3].names.length, 0);
+  });
+
+  // --- assignBreaks: 名前順ソート ---
+  testGroup_('BreakService.assignBreaks 名前順ソート', function () {
+    var staff = [
+      makeStaff_('D田中', '社員', '午前'),
+      makeStaff_('A鈴木', '社員', '午前'),
+      makeStaff_('C佐藤', '社員', '午前'),
+      makeStaff_('B山田', '社員', '午前')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 社員4名 → floor(4/2)=2名前半, 2名後半（名前順ソート）
+    assertDeepEqual_('ソート: AM前半', breaks[0].names, ['A鈴木', 'B山田']);
+    assertDeepEqual_('ソート: AM後半', breaks[1].names, ['C佐藤', 'D田中']);
+  });
+
+  // --- isOnBreak ---
+  testGroup_('BreakService.isOnBreak', function () {
+    var breaks = [
+      { breakAtMin: 840, names: ['田中'] },
+      { breakAtMin: 900, names: ['山田'] }
+    ];
+    var duration = 60;
+
+    // 休憩中（開始ちょうど）
+    assertEqual_('isOnBreak: 田中 at 840', BreakService.isOnBreak(breaks, '田中', 840, duration), true);
+
+    // 休憩中（中間）
+    assertEqual_('isOnBreak: 田中 at 860', BreakService.isOnBreak(breaks, '田中', 860, duration), true);
+
+    // 休憩中（終了-1）
+    assertEqual_('isOnBreak: 田中 at 899', BreakService.isOnBreak(breaks, '田中', 899, duration), true);
+
+    // 休憩外（終了ちょうど、半開区間）
+    assertEqual_('isOnBreak: 田中 at 900', BreakService.isOnBreak(breaks, '田中', 900, duration), false);
+
+    // 休憩外（開始前）
+    assertEqual_('isOnBreak: 田中 at 839', BreakService.isOnBreak(breaks, '田中', 839, duration), false);
+
+    // 該当なし（名前不一致）
+    assertEqual_('isOnBreak: 佐藤 not found', BreakService.isOnBreak(breaks, '佐藤', 840, duration), false);
+
+    // 山田は900開始
+    assertEqual_('isOnBreak: 山田 at 900', BreakService.isOnBreak(breaks, '山田', 900, duration), true);
+    assertEqual_('isOnBreak: 山田 at 959', BreakService.isOnBreak(breaks, '山田', 959, duration), true);
+    assertEqual_('isOnBreak: 山田 at 960', BreakService.isOnBreak(breaks, '山田', 960, duration), false);
+  });
+
+  // --- filterEligible_ ---
+  testGroup_('BreakService.filterEligible_', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '午前'),
+      makeStaff_('山田', '社員', '午後'),
+      makeStaff_('鈴木', '社員', '早朝'),
+      makeStaff_('佐藤', '社員', '時差'),
+      makeStaff_('高橋', '社員', '午前')
+    ];
+    var excl = ExclusionService.createEmpty();
+    excl.allDay = ExclusionService.buildAllDaySet(['高橋']);
+
+    var amResult = BreakService.filterEligible_(staff, '午前', excl);
+    assertEqual_('filterEligible_ 午前 count', amResult.length, 1);
+    assertEqual_('filterEligible_ 午前 name', amResult[0].name, '田中');
+
+    var pmResult = BreakService.filterEligible_(staff, '午後', excl);
+    assertEqual_('filterEligible_ 午後 count', pmResult.length, 1);
+    assertEqual_('filterEligible_ 午後 name', pmResult[0].name, '山田');
+  });
+
+  // --- splitGroup_ 直接テスト ---
+  testGroup_('BreakService.splitGroup_', function () {
+    var staff = [
+      makeStaff_('A社員', '社員', '午前'),
+      makeStaff_('Bバイト', 'アルバイト', '午前'),
+      makeStaff_('C社員', '社員', '午前'),
+      makeStaff_('Dバイト', 'アルバイト', '午前')
+    ];
+    var excl = ExclusionService.createEmpty();
+
+    var result = BreakService.splitGroup_(staff, excl, 840, 900);
+
+    // 社員2名: floor(2/2)=1前半, 1後半
+    // アルバイト2名: floor(2/2)=1前半, 1後半
+    assertEqual_('splitGroup_ first count', result.first.length, 2);
+    assertEqual_('splitGroup_ second count', result.second.length, 2);
+  });
+
+  // --- 検証例 (plan文書の検証方法) ---
+  testGroup_('BreakService 検証例', function () {
+    var staff = [
+      makeStaff_('田中', '社員', '午前'),
+      makeStaff_('山田', 'アルバイト', '午前'),
+      makeStaff_('鈴木', '社員', '午後'),
+      makeStaff_('佐藤', 'アルバイト', '午後'),
+      makeStaff_('高橋', '社員', '早朝')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl);
+
+    // 高橋(早朝)は割当なし
+    var allNames = [];
+    for (var i = 0; i < breaks.length; i++) {
+      allNames = allNames.concat(breaks[i].names);
+    }
+    assertTrue_('検証例: 高橋が含まれない', allNames.indexOf('高橋') === -1);
+
+    // AM: 社員1名(田中)+アルバイト1名(山田) → 各floor(1/2)=0前半, 1後半
+    assertEqual_('検証例: AM前半 empty', breaks[0].names.length, 0);
+    assertTrue_('検証例: AM後半に田中', breaks[1].names.indexOf('田中') !== -1);
+    assertTrue_('検証例: AM後半に山田', breaks[1].names.indexOf('山田') !== -1);
+
+    // PM: 社員1名(鈴木)+アルバイト1名(佐藤) → 各floor(1/2)=0前半, 1後半
+    assertEqual_('検証例: PM前半 empty', breaks[2].names.length, 0);
+    assertTrue_('検証例: PM後半に鈴木', breaks[3].names.indexOf('鈴木') !== -1);
+    assertTrue_('検証例: PM後半に佐藤', breaks[3].names.indexOf('佐藤') !== -1);
+
+    // isOnBreak テスト
+    assertEqual_('検証例: 田中 at 840', BreakService.isOnBreak(breaks, '田中', 840, 60), false);
+    // 田中はAM後半(900)に入っている
+    assertEqual_('検証例: 田中 at 900', BreakService.isOnBreak(breaks, '田中', 900, 60), true);
+    assertEqual_('検証例: 田中 at 959', BreakService.isOnBreak(breaks, '田中', 959, 60), true);
+    assertEqual_('検証例: 田中 at 960', BreakService.isOnBreak(breaks, '田中', 960, 60), false);
   });
 }
