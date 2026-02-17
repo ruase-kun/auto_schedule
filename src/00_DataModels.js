@@ -105,3 +105,10 @@
  * @property {boolean} excluded - 除外されているか
  * @property {string}  reason   - 除外理由（"allDay"|"timeRange"|"tournament"|""）
  */
+
+/**
+ * 休憩割当エントリ
+ * @typedef {Object} BreakAssignment
+ * @property {number}   breakAtMin - 休憩開始時刻（分）
+ * @property {string[]} names      - 休憩者名リスト
+ */
