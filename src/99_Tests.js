@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1+2+3+4+5 テストスイート
+ * 99_Tests.js — Phase 1+2+3+4+5+6 テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1+2+3+4+5 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1+2+3+4+5+6 テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,7 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1+2+3+4+5 テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1+2+3+4+5+6 テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -162,6 +162,9 @@ function runAllPhase1Tests() {
   // Phase 5 純粋テスト
   testTimelineServicePure_();
 
+  // Phase 6 純粋テスト
+  testHistoryServicePure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -171,7 +174,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1+2+3+4+5 テスト結果 ===\n' +
+    '=== Phase 1+2+3+4+5+6 テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -186,11 +189,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1+2+3+4+5 テスト結果',
+      ui.alert('Phase 1+2+3+4+5+6 テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1+2+3+4+5 テスト結果',
+      ui.alert('Phase 1+2+3+4+5+6 テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -1941,5 +1944,247 @@ function testTimelineServicePure_() {
     // 13:00 — 田中:休憩, 山田:勤務中&配置なし
     assertEqual_('統合: 13:00 田中', matrix[3][1], '休憩');
     assertEqual_('統合: 13:00 山田', matrix[3][2], '浮き');
+  });
+}
+
+/* ---------- Phase 6: HistoryService テスト ---------- */
+
+function testHistoryServicePure_() {
+
+  // --- formatDate_ テスト ---
+
+  // #1: 基本
+  testGroup_('HS: formatDate_ 基本', function () {
+    var d = new Date(2026, 2, 15); // 月は0始まり → 3月
+    assertEqual_('formatDate_ 基本', HistoryService.formatDate_(d), '2026-03-15');
+  });
+
+  // #2: ゼロパディング
+  testGroup_('HS: formatDate_ ゼロパディング', function () {
+    var d = new Date(2026, 0, 5); // 1月5日
+    assertEqual_('formatDate_ ゼロパディング', HistoryService.formatDate_(d), '2026-01-05');
+  });
+
+  // --- formatBreaks_ テスト ---
+
+  // #3: 基本
+  testGroup_('HS: formatBreaks_ 基本', function () {
+    var ba = [{ breakAtMin: 840, names: ['A', 'B'] }];
+    var result = HistoryService.formatBreaks_(ba);
+    assertDeepEqual_('formatBreaks_ 基本', result, [
+      { time: '14:00', names: ['A', 'B'] }
+    ]);
+  });
+
+  // #4: 空names除外
+  testGroup_('HS: formatBreaks_ 空names除外', function () {
+    var ba = [
+      { breakAtMin: 840, names: ['A'] },
+      { breakAtMin: 900, names: [] }
+    ];
+    var result = HistoryService.formatBreaks_(ba);
+    assertEqual_('空names除外: 長さ', result.length, 1);
+    assertEqual_('空names除外: time', result[0].time, '14:00');
+  });
+
+  // #5: 複数
+  testGroup_('HS: formatBreaks_ 複数', function () {
+    var ba = [
+      { breakAtMin: 840, names: ['A', 'B'] },
+      { breakAtMin: 900, names: ['C'] }
+    ];
+    var result = HistoryService.formatBreaks_(ba);
+    assertEqual_('複数: 長さ', result.length, 2);
+    assertEqual_('複数: 1件目time', result[0].time, '14:00');
+    assertDeepEqual_('複数: 1件目names', result[0].names, ['A', 'B']);
+    assertEqual_('複数: 2件目time', result[1].time, '15:00');
+    assertDeepEqual_('複数: 2件目names', result[1].names, ['C']);
+  });
+
+  // --- formatPlacements_ テスト ---
+
+  // #6: 基本
+  testGroup_('HS: formatPlacements_ 基本', function () {
+    var pl = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '山田', source: 'auto' }
+    ];
+    var result = HistoryService.formatPlacements_(pl);
+    assertDeepEqual_('formatPlacements_ 基本', result, [
+      { time: '10:00', post: 'レジ1', name: '山田', source: 'auto' }
+    ]);
+  });
+
+  // #7: carry
+  testGroup_('HS: formatPlacements_ carry', function () {
+    var pl = [
+      { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: '加工1', staffName: '山田', source: 'carry' }
+    ];
+    var result = HistoryService.formatPlacements_(pl);
+    assertEqual_('carry source保持', result[0].source, 'carry');
+  });
+
+  // #8: 空配列
+  testGroup_('HS: formatPlacements_ 空配列', function () {
+    var result = HistoryService.formatPlacements_([]);
+    assertDeepEqual_('空配列', result, []);
+  });
+
+  // --- formatWaves_ テスト ---
+
+  // #9: 基本
+  testGroup_('HS: formatWaves_ 基本', function () {
+    var waves = [{
+      waveNumber: 1,
+      tasks: [
+        { process: 'ピッキング', startMin: 600, endMin: 660, assignedStaff: '田中' }
+      ]
+    }];
+    var result = HistoryService.formatWaves_(waves);
+    assertDeepEqual_('formatWaves_ 基本', result, [{
+      waveNumber: 1,
+      tasks: [
+        { process: 'ピッキング', start: '10:00', end: '11:00', staff: '田中' }
+      ]
+    }]);
+  });
+
+  // #10: 複数wave×複数タスク
+  testGroup_('HS: formatWaves_ 複数wave', function () {
+    var waves = [
+      {
+        waveNumber: 1,
+        tasks: [
+          { process: 'ピッキング', startMin: 600, endMin: 660, assignedStaff: '田中' },
+          { process: '梱包', startMin: 660, endMin: 720, assignedStaff: '山田' }
+        ]
+      },
+      {
+        waveNumber: 2,
+        tasks: [
+          { process: 'ピッキング', startMin: 780, endMin: 840, assignedStaff: '佐藤' }
+        ]
+      }
+    ];
+    var result = HistoryService.formatWaves_(waves);
+    assertEqual_('複数wave: 長さ', result.length, 2);
+    assertEqual_('wave1 タスク数', result[0].tasks.length, 2);
+    assertEqual_('wave2 タスク数', result[1].tasks.length, 1);
+    assertEqual_('wave1 task1 start', result[0].tasks[0].start, '10:00');
+    assertEqual_('wave1 task2 end', result[0].tasks[1].end, '12:00');
+    assertEqual_('wave2 waveNumber', result[1].waveNumber, 2);
+    assertEqual_('wave2 task1 staff', result[1].tasks[0].staff, '佐藤');
+  });
+
+  // --- buildJson テスト ---
+
+  // #12: 基本（wavesなし）
+  testGroup_('HS: buildJson wavesなし', function () {
+    var params = {
+      targetDate: new Date(2026, 2, 15),
+      department: '販売',
+      type: '仮',
+      breakAssignments: [
+        { breakAtMin: 840, names: ['A', 'B'] },
+        { breakAtMin: 900, names: ['C'] }
+      ],
+      placements: [
+        { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '山田', source: 'auto' }
+      ],
+      waves: null
+    };
+    var json = HistoryService.buildJson(params);
+
+    assertEqual_('date', json.date, '2026-03-15');
+    assertEqual_('department', json.department, '販売');
+    assertEqual_('breaks長さ', json.breaks.length, 2);
+    assertEqual_('placements長さ', json.placements.length, 1);
+    assertTrue_('wavesキー無し', !json.hasOwnProperty('waves'));
+  });
+
+  // #13: waves付き
+  testGroup_('HS: buildJson waves付き', function () {
+    var params = {
+      targetDate: new Date(2026, 2, 15),
+      department: '通販',
+      type: '本',
+      breakAssignments: [{ breakAtMin: 840, names: ['A'] }],
+      placements: [
+        { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '山田', source: 'auto' }
+      ],
+      waves: [{
+        waveNumber: 1,
+        tasks: [
+          { process: 'ピッキング', startMin: 600, endMin: 660, assignedStaff: '田中' }
+        ]
+      }]
+    };
+    var json = HistoryService.buildJson(params);
+
+    assertTrue_('wavesキー有り', json.hasOwnProperty('waves'));
+    assertEqual_('waves長さ', json.waves.length, 1);
+    assertEqual_('waves[0].waveNumber', json.waves[0].waveNumber, 1);
+  });
+
+  // #14: wavesがnull → wavesキー省略
+  testGroup_('HS: buildJson wavesがnull', function () {
+    var params = {
+      targetDate: new Date(2026, 0, 1),
+      department: '販売',
+      type: '仮',
+      breakAssignments: [],
+      placements: [],
+      waves: null
+    };
+    var json = HistoryService.buildJson(params);
+    assertTrue_('wavesキー省略', !json.hasOwnProperty('waves'));
+  });
+
+  // #15: 空placements/空breaks
+  testGroup_('HS: buildJson 空placements/空breaks', function () {
+    var params = {
+      targetDate: new Date(2026, 5, 10),
+      department: '販売',
+      type: '仮',
+      breakAssignments: [],
+      placements: [],
+      waves: null
+    };
+    var json = HistoryService.buildJson(params);
+    assertDeepEqual_('空breaks', json.breaks, []);
+    assertDeepEqual_('空placements', json.placements, []);
+  });
+
+  // #16: 統合例（§10.3準拠）
+  testGroup_('HS: buildJson 統合例', function () {
+    var params = {
+      targetDate: new Date(2026, 2, 15),
+      department: '販売',
+      type: '仮',
+      breakAssignments: [
+        { breakAtMin: 840, names: ['A', 'B'] },
+        { breakAtMin: 900, names: ['C'] }
+      ],
+      placements: [
+        { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: 'レジ1', staffName: '山田', source: 'auto' },
+        { slotIndex: 0, timeMin: 600, rowNumber: 3, postName: '加工1', staffName: '山田', source: 'carry' }
+      ],
+      waves: null
+    };
+    var json = HistoryService.buildJson(params);
+
+    // 構造全体を検証
+    var expected = {
+      date: '2026-03-15',
+      department: '販売',
+      breaks: [
+        { time: '14:00', names: ['A', 'B'] },
+        { time: '15:00', names: ['C'] }
+      ],
+      placements: [
+        { time: '10:00', post: 'レジ1', name: '山田', source: 'auto' },
+        { time: '10:00', post: '加工1', name: '山田', source: 'carry' }
+      ]
+    };
+    assertDeepEqual_('統合例JSON', json, expected);
   });
 }
