@@ -90,3 +90,18 @@
  * @property {boolean} enableWaves     - 陣スケジュール有効
  * @property {string}  dateSheetSuffix - 日付シートサフィックス
  */
+
+/**
+ * 除外情報（終日・時間帯・大会）
+ * @typedef {Object} Exclusions
+ * @property {Object<string, boolean>} allDay       - 終日除外セット（名前→true）
+ * @property {Array<{name: string, startMin: number, endMin: number}>} timeRanges  - 時間帯除外
+ * @property {Array<{name: string, startMin: number, endMin: number}>} tournaments - 大会除外
+ */
+
+/**
+ * 除外判定結果
+ * @typedef {Object} ExclusionResult
+ * @property {boolean} excluded - 除外されているか
+ * @property {string}  reason   - 除外理由（"allDay"|"timeRange"|"tournament"|""）
+ */
