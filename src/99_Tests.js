@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1~6+1.5+4.5 テストスイート
+ * 99_Tests.js — Phase 1~6+1.5+4.5+7A テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1~6+1.5+4.5 テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1~6+1.5+4.5+7A テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -16,7 +16,9 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
-    .addItem('Phase 1~6+1.5+4.5 テスト実行', 'runAllPhase1Tests')
+    .addItem('配置を生成する', 'showWizard')
+    .addSeparator()
+    .addItem('Phase 1~6+1.5+4.5+7A テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -171,6 +173,9 @@ function runAllPhase1Tests() {
   // Phase 4.5 純粋テスト
   testWaveServicePure_();
 
+  // Phase 7A 純粋テスト
+  testUiWizardControllerPure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -180,7 +185,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1~6+1.5+4.5 テスト結果 ===\n' +
+    '=== Phase 1~6+1.5+4.5+7A テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -195,11 +200,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1~6+1.5+4.5 テスト結果',
+      ui.alert('Phase 1~6+1.5+4.5+7A テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1~6+1.5+4.5 テスト結果',
+      ui.alert('Phase 1~6+1.5+4.5+7A テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -2498,5 +2503,47 @@ function testWaveServicePure_() {
     assertDeepEqual_('buildWavesJson: assignedStaff付き',
       WaveService.buildWavesJson(waves18),
       [{ waveNumber: 1, tasks: [{ process: 'ピック', start: '9:00', end: '10:30', staff: ['田中', '鈴木'] }] }]);
+  });
+}
+
+/* ---------- UiWizardController テスト (Phase 7A) ---------- */
+
+function testUiWizardControllerPure_() {
+  testGroup_('UiWizardController (pure)', function () {
+    // #1 formatDateSheetName_: 基本
+    var date1 = new Date(2026, 2, 15); // 2026-03-15 (日)
+    assertEqual_('formatDateSheetName_: 基本',
+      UiWizardController.formatDateSheetName_(date1, ''),
+      '03/15(日)');
+
+    // #2 formatDateSheetName_: suffix付き
+    assertEqual_('formatDateSheetName_: suffix付き',
+      UiWizardController.formatDateSheetName_(date1, '_通販'),
+      '03/15(日)_通販');
+
+    // #3 formatDateSheetName_: 1桁月日
+    var date2 = new Date(2026, 0, 5); // 2026-01-05 (月)
+    assertEqual_('formatDateSheetName_: 1桁月日',
+      UiWizardController.formatDateSheetName_(date2, ''),
+      '01/05(月)');
+
+    // #4 extractDatesFromSheet_: 基本
+    var data4 = [
+      [new Date(2026, 2, 15), '', '', new Date(2026, 2, 16), '', ''],
+      ['曜日', '', '', '曜日', '', ''],
+      ['', '田中', '午前', '', '鈴木', '午後'],
+      ['', '佐藤', '早朝', '', '', '']
+    ];
+    var result4 = UiWizardController.extractDatesFromSheet_(data4);
+    assertEqual_('extractDatesFromSheet_: 日付数', result4.length, 2);
+    assertEqual_('extractDatesFromSheet_: dateStr[0]', result4[0].dateStr, '3/15');
+
+    // #5 extractDatesFromSheet_: 空シート
+    var result5 = UiWizardController.extractDatesFromSheet_([]);
+    assertEqual_('extractDatesFromSheet_: 空シート', result5.length, 0);
+
+    // #6 extractDatesFromSheet_: staffCount
+    assertEqual_('extractDatesFromSheet_: staffCount[0]', result4[0].staffCount, 2);
+    assertEqual_('extractDatesFromSheet_: staffCount[1]', result4[1].staffCount, 1);
   });
 }

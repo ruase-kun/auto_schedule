@@ -44,6 +44,9 @@ var Orchestrator = (function () {
     // 7. テンプレ時間行取得
     var timeRows = SheetGateway.getTimeRows(params.templateSheet);
 
+    // 7.5. スロットの rowNumber 解決（新形式コマ定義対応）
+    resolveSlotRows_(config.slots, timeRows);
+
     // 8. 持ち場検出
     var posts = SheetGateway.detectPosts(params.templateSheet);
 
@@ -63,6 +66,9 @@ var Orchestrator = (function () {
       breakExcludedRows: breakExcludedRows,
       exclusions: params.exclusions
     });
+
+    // 10.5. 配置展開（1スロット→複数テンプレ行に展開）
+    placements = expandPlacements_(placements, config.slots, timeRows);
 
     // 11. 既存日付シート削除
     SheetGateway.deleteSheetIfExists(params.dateSheetName);
@@ -165,6 +171,93 @@ var Orchestrator = (function () {
       // setValues: 1始まり列番号 = colIndex + 1
       SheetGateway.setValues(sheetName, rowNum, firstPostCol + 1, [rowData]);
     }
+  }
+
+  /**
+   * スロットの rowNumber を解決する（新形式コマ定義対応）
+   * rowNumber が null のスロットについて、テンプレ時間行から対応する行番号を設定する。
+   *
+   * @param {TimeSlot[]} slots
+   * @param {TimeRow[]} timeRows
+   */
+  function resolveSlotRows_(slots, timeRows) {
+    for (var i = 0; i < slots.length; i++) {
+      if (slots[i].rowNumber !== null && slots[i].rowNumber !== undefined) continue;
+      // slot.startMin 以上の最初のテンプレ行を探す
+      for (var t = 0; t < timeRows.length; t++) {
+        if (timeRows[t].timeMin >= slots[i].startMin) {
+          slots[i].rowNumber = timeRows[t].rowNumber;
+          break;
+        }
+      }
+      // 見つからなければ最終行
+      if (slots[i].rowNumber === null || slots[i].rowNumber === undefined) {
+        slots[i].rowNumber = timeRows[timeRows.length - 1].rowNumber;
+      }
+    }
+  }
+
+  /**
+   * 配置を時間帯内の全テンプレ行に展開する
+   *
+   * PlacementEngine は各スロットにつき1行分の配置を生成するが、
+   * スロットが複数のテンプレ行にまたがる場合（例: 10:00-11:30）、
+   * 該当する全行（10:00, 10:30, 11:00）に同じ人を配置する。
+   *
+   * スロットの startMin == endMin - 30（1行分）の場合は展開不要。
+   *
+   * @param {Placement[]} placements
+   * @param {TimeSlot[]} slots
+   * @param {TimeRow[]} timeRows
+   * @returns {Placement[]}
+   */
+  function expandPlacements_(placements, slots, timeRows) {
+    // スロットが全て1行分なら展開不要（高速パス）
+    var needsExpansion = false;
+    for (var s = 0; s < slots.length; s++) {
+      if (slots[s].endMin - slots[s].startMin > 30) {
+        needsExpansion = true;
+        break;
+      }
+    }
+    if (!needsExpansion) return placements;
+
+    // slotIndex → テンプレ行リスト のマッピング構築
+    var slotRowsMap = {};
+    for (var si = 0; si < slots.length; si++) {
+      var slot = slots[si];
+      var rows = [];
+      for (var t = 0; t < timeRows.length; t++) {
+        var tr = timeRows[t];
+        if (tr.timeMin >= slot.startMin && tr.timeMin < slot.endMin) {
+          rows.push({ timeMin: tr.timeMin, rowNumber: tr.rowNumber });
+        }
+      }
+      slotRowsMap[si] = rows;
+    }
+
+    // 展開
+    var expanded = [];
+    for (var i = 0; i < placements.length; i++) {
+      var p = placements[i];
+      var targetRows = slotRowsMap[p.slotIndex];
+      if (!targetRows || targetRows.length <= 1) {
+        // 展開不要（1行以下）
+        expanded.push(p);
+      } else {
+        for (var r = 0; r < targetRows.length; r++) {
+          expanded.push({
+            slotIndex: p.slotIndex,
+            timeMin: targetRows[r].timeMin,
+            rowNumber: targetRows[r].rowNumber,
+            postName: p.postName,
+            staffName: p.staffName,
+            source: p.source
+          });
+        }
+      }
+    }
+    return expanded;
   }
 
   return {

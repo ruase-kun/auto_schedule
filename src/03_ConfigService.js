@@ -125,6 +125,13 @@ var ConfigService = (function () {
 
   /**
    * コマ定義をパースする（内部）
+   *
+   * 2つのフォーマットを自動検出:
+   *   新形式（時間境界）: A列に開始時刻のみ（10:00 / 11:30 / ...）
+   *   旧形式（4列）:      slotId | rowNumber | startTime | endTime
+   *
+   * 新形式では rowNumber は null（Orchestrator で解決）。
+   *
    * @param {Array<Array<*>>} data
    * @param {number} start - データ開始index
    * @param {number} end   - データ終了index (exclusive)
@@ -132,6 +139,36 @@ var ConfigService = (function () {
    * @throws {Error} 昇順違反時 (V8)
    */
   function parseSlots_(data, start, end) {
+    if (start >= end) return [];
+
+    // フォーマット検出: B列が空または非数値 → 新形式
+    var firstRow = data[start];
+    var colB = firstRow[1];
+    var isLegacy = colB !== '' && colB !== null && colB !== undefined &&
+                   !isNaN(parseInt(colB, 10)) && parseInt(colB, 10) > 0;
+
+    var slots = isLegacy
+      ? parseSlotsLegacy_(data, start, end)
+      : parseSlotsTimeBoundary_(data, start, end);
+
+    // 開始時刻昇順バリデーション (V8)
+    for (var k = 1; k < slots.length; k++) {
+      if (slots[k].startMin <= slots[k - 1].startMin) {
+        throw new Error(
+          'ConfigService: コマ定義の開始時刻が昇順ではありません (V8): ' +
+            slots[k - 1].slotId + '(' + slots[k - 1].startMin + ') >= ' +
+            slots[k].slotId + '(' + slots[k].startMin + ')'
+        );
+      }
+    }
+
+    return slots;
+  }
+
+  /**
+   * 旧形式コマ定義パース: slotId | rowNumber | startTime | endTime
+   */
+  function parseSlotsLegacy_(data, start, end) {
     var slots = [];
     for (var i = start; i < end; i++) {
       var row = data[i];
@@ -153,18 +190,32 @@ var ConfigService = (function () {
         endMin: endMin
       });
     }
+    return slots;
+  }
 
-    // 開始時刻昇順バリデーション (V8)
-    for (var k = 1; k < slots.length; k++) {
-      if (slots[k].startMin <= slots[k - 1].startMin) {
-        throw new Error(
-          'ConfigService: コマ定義の開始時刻が昇順ではありません (V8): ' +
-            slots[k - 1].slotId + '(' + slots[k - 1].startMin + ') >= ' +
-            slots[k].slotId + '(' + slots[k].startMin + ')'
-        );
-      }
+  /**
+   * 新形式コマ定義パース: A列に開始時刻のみ
+   * endMin は次の境界の startMin。最後のスロットは +30分。
+   * rowNumber は null（Orchestrator で解決）。
+   */
+  function parseSlotsTimeBoundary_(data, start, end) {
+    var times = [];
+    for (var i = start; i < end; i++) {
+      var cell = data[i][0];
+      if (cell === '' || cell === null || cell === undefined) continue;
+      times.push(parseTimeCell_(cell));
     }
 
+    var slots = [];
+    for (var j = 0; j < times.length; j++) {
+      var endMin = (j + 1 < times.length) ? times[j + 1] : times[j] + 30;
+      slots.push({
+        slotId: 'slot_' + (j + 1),
+        startMin: times[j],
+        endMin: endMin,
+        rowNumber: null
+      });
+    }
     return slots;
   }
 
