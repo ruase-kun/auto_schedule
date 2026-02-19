@@ -16,6 +16,21 @@ var SkillService = (function () {
   'use strict';
 
   /**
+   * スキルレベルセル値をパースする（内部）
+   * 数値(1), 文字列("Lv.4","Lv4","4") → number。パース不能 → NaN。
+   * @param {*} value - セル値
+   * @returns {number}
+   */
+  function parseLevelCell_(value) {
+    if (typeof value === 'number') return value;
+    var s = String(value).trim();
+    if (s === '') return NaN;
+    var m = s.match(/(\d+)/);
+    if (m) return parseInt(m[1], 10);
+    return NaN;
+  }
+
+  /**
    * スキルマトリクスと雇用形態マップを読込む
    * @param {string} skillSheetName - スキルレベル表シート名
    * @param {string[]} [postFilter] - 持ち場フィルタ（指定時はこれらの持ち場のみ取得）
@@ -60,7 +75,7 @@ var SkillService = (function () {
         var col = postColumns[p].colIndex;
         var pName = postColumns[p].postName;
         var rawLv = data[r][col];
-        var lv = parseInt(rawLv, 10);
+        var lv = parseLevelCell_(rawLv);
 
         // 非数値・未設定 → 0（配置不可）
         if (isNaN(lv)) {
@@ -97,6 +112,7 @@ var SkillService = (function () {
 
   return {
     loadSkills: loadSkills,
-    mergeEmployment: mergeEmployment
+    mergeEmployment: mergeEmployment,
+    parseLevelCell_: parseLevelCell_
   };
 })();

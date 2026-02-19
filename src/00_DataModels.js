@@ -123,3 +123,26 @@
  * @property {string}          staffName - スタッフ名
  * @property {"auto"|"carry"}  source    - 配置ソース
  */
+
+/**
+ * 陣テンプレート
+ * @typedef {Object} WaveTemplate
+ * @property {string}  templateName - テンプレート名
+ * @property {Wave[]}  waves        - 陣一覧
+ */
+
+/**
+ * 陣（ウェーブ）
+ * @typedef {Object} Wave
+ * @property {number}     waveNumber - 陣番号（1始まり）
+ * @property {WaveTask[]} tasks      - 工程タスク一覧
+ */
+
+/**
+ * 陣の工程タスク
+ * @typedef {Object} WaveTask
+ * @property {string}   process       - 工程名（ピック, 梱包, 振り分け等）
+ * @property {number}   startMin      - 開始時刻（分）
+ * @property {number}   endMin        - 終了時刻（分）
+ * @property {string[]} assignedStaff - 担当者リスト（Level 1 では空配列）
+ */
