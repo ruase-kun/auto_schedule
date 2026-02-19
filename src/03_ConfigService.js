@@ -195,7 +195,7 @@ var ConfigService = (function () {
 
   /**
    * 新形式コマ定義パース: A列に開始時刻のみ
-   * endMin は次の境界の startMin。最後のスロットは +30分。
+   * endMin は次の境界の startMin。最後のスロットは他と同じ間隔（デフォルト90分）。
    * rowNumber は null（Orchestrator で解決）。
    */
   function parseSlotsTimeBoundary_(data, start, end) {
@@ -206,9 +206,12 @@ var ConfigService = (function () {
       times.push(parseTimeCell_(cell));
     }
 
+    // 境界間隔を算出（最後のスロットにも同じ間隔を適用）
+    var interval = (times.length >= 2) ? (times[1] - times[0]) : 90;
+
     var slots = [];
     for (var j = 0; j < times.length; j++) {
-      var endMin = (j + 1 < times.length) ? times[j + 1] : times[j] + 30;
+      var endMin = (j + 1 < times.length) ? times[j + 1] : times[j] + interval;
       slots.push({
         slotId: 'slot_' + (j + 1),
         startMin: times[j],

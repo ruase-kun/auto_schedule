@@ -20,7 +20,12 @@
   .step-title {
     font-size: 16px;
     font-weight: bold;
-    margin-bottom: 16px;
+    margin-bottom: 8px;
+  }
+  .step-desc {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 12px;
   }
   .step { display: none; }
   .step.active { display: block; }
@@ -74,10 +79,115 @@
   }
   .select-actions a:hover { text-decoration: underline; }
 
+  /* 終日除外 (Step 2) */
+  .staff-excl-list {
+    list-style: none;
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+  }
+  .staff-excl-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .staff-excl-item:last-child { border-bottom: none; }
+  .staff-excl-item label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  .staff-excl-item input[type="checkbox"] { margin-right: 8px; }
+  .employment-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    margin-left: 8px;
+    background: #f0f0f0;
+    color: #666;
+  }
+  .employment-badge.leader { background: #fff3e0; color: #e65100; }
+  .employment-badge.subleader { background: #e8f5e9; color: #2e7d32; }
+  .excl-actions { margin-bottom: 8px; }
+  .excl-actions a {
+    color: #4285f4;
+    cursor: pointer;
+    font-size: 13px;
+    margin-right: 12px;
+    text-decoration: none;
+  }
+  .excl-actions a:hover { text-decoration: underline; }
+  .excl-count {
+    font-size: 12px;
+    color: #888;
+    margin-top: 6px;
+  }
+
+  /* 時間帯除外 / 大会除外 (Steps 3, 4) */
+  .excl-rows { margin-bottom: 8px; }
+  .excl-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+    padding: 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    flex-wrap: wrap;
+  }
+  .excl-row select {
+    padding: 4px 6px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+    font-size: 13px;
+  }
+  .excl-row .remove-btn {
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0 4px;
+  }
+  .excl-row .remove-btn:hover { color: #ea4335; }
+  .range-error {
+    color: #c5221f;
+    font-size: 11px;
+    width: 100%;
+    margin-top: 2px;
+  }
+  .add-btn {
+    background: none;
+    border: 1px dashed #4285f4;
+    color: #4285f4;
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .add-btn:hover { background: #f0f4ff; }
+
+  /* 大会プリセット */
+  .preset-area { margin-bottom: 12px; }
+  .preset-label { font-size: 13px; color: #555; margin-bottom: 6px; }
+  .preset-btns { display: flex; flex-wrap: wrap; gap: 6px; }
+  .preset-btn {
+    padding: 6px 14px;
+    border: 1px solid #4285f4;
+    border-radius: 4px;
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .preset-btn:hover { background: #d2e3fc; }
+
   /* 確認画面 */
-  .confirm-section { margin-bottom: 12px; }
+  .confirm-section { margin-bottom: 10px; }
   .confirm-label { font-weight: bold; color: #555; font-size: 13px; }
-  .confirm-value { margin-top: 4px; }
+  .confirm-value { margin-top: 2px; font-size: 13px; }
 
   /* 結果表示 */
   .result-item {
@@ -176,11 +286,7 @@
 
   <!-- Step 1: 日付選択 -->
   <div class="step" id="step1">
-    <div class="step-title">日付を選択してください（複数選択可）</div>
-    <div class="select-actions">
-      <a onclick="selectAllDates()">すべて選択</a>
-      <a onclick="deselectAllDates()">すべて解除</a>
-    </div>
+    <div class="step-title">日付を選択してください</div>
     <ul class="date-list" id="dateList"></ul>
     <div id="dateSpinner" class="spinner-area">
       <div class="spinner" style="margin: 0 auto;"></div>
@@ -192,8 +298,56 @@
     </div>
   </div>
 
-  <!-- Step 2: 確認＆生成 -->
+  <!-- Step 2: 終日除外設定 -->
   <div class="step" id="step2">
+    <div class="step-title">終日除外設定</div>
+    <div class="step-desc">配置から終日除外するスタッフを選択してください。リーダー・サブリーダーは初期状態でONになっています。</div>
+    <div id="exclSpinner" class="spinner-area">
+      <div class="spinner" style="margin: 0 auto;"></div>
+      <div class="spinner-text">スタッフ情報を読み込み中...</div>
+    </div>
+    <div id="allDayContent" style="display:none;">
+      <div class="excl-actions">
+        <a onclick="allDaySetAll(true)">全員ON</a>
+        <a onclick="allDaySetAll(false)">全員OFF</a>
+        <a onclick="allDaySetLeaders()">リーダーのみON</a>
+      </div>
+      <ul class="staff-excl-list" id="allDayList"></ul>
+      <div class="excl-count" id="allDayCount"></div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goToStep(1)">戻る</button>
+      <button class="btn btn-primary" id="btnStep2Next" onclick="goToStep(3)">次へ</button>
+    </div>
+  </div>
+
+  <!-- Step 3: 時間帯除外設定 -->
+  <div class="step" id="step3">
+    <div class="step-title">時間帯除外設定</div>
+    <div class="step-desc">特定の時間帯に配置から除外するスタッフを設定してください。不要な場合はそのまま「次へ」を押してください。</div>
+    <div class="excl-rows" id="timeRangeRows"></div>
+    <button class="add-btn" onclick="addTimeRange()">+ 追加</button>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goToStep(2)">戻る</button>
+      <button class="btn btn-primary" onclick="goToStep(4)">次へ</button>
+    </div>
+  </div>
+
+  <!-- Step 4: 大会除外設定 -->
+  <div class="step" id="step4">
+    <div class="step-title">大会除外設定</div>
+    <div class="step-desc">大会運営者の除外設定を行ってください。プリセットから追加すると時間帯が自動入力されます。大会がない場合はそのまま「次へ」を押してください。</div>
+    <div class="preset-area" id="tournamentPresets"></div>
+    <div class="excl-rows" id="tournamentRows"></div>
+    <button class="add-btn" onclick="addTournament()">+ 手動追加</button>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="goToStep(3)">戻る</button>
+      <button class="btn btn-primary" onclick="goToStep(5)">次へ</button>
+    </div>
+  </div>
+
+  <!-- Step 5: 確認＆生成 -->
+  <div class="step" id="step5">
     <div class="step-title">確認</div>
     <div id="confirmArea">
       <div class="confirm-section">
@@ -205,8 +359,16 @@
         <div class="confirm-value" id="confirmDates"></div>
       </div>
       <div class="confirm-section">
-        <div class="confirm-label">除外</div>
-        <div class="confirm-value" style="color:#888;">なし（7A-2で追加予定）</div>
+        <div class="confirm-label">終日除外</div>
+        <div class="confirm-value" id="confirmAllDay"></div>
+      </div>
+      <div class="confirm-section">
+        <div class="confirm-label">時間帯除外</div>
+        <div class="confirm-value" id="confirmTimeRanges"></div>
+      </div>
+      <div class="confirm-section">
+        <div class="confirm-label">大会除外</div>
+        <div class="confirm-value" id="confirmTournaments"></div>
       </div>
     </div>
     <div id="generateSpinner" class="spinner-area">
@@ -217,7 +379,7 @@
     </div>
     <div id="errorArea" class="error-msg"></div>
     <div class="btn-row" id="confirmButtons">
-      <button class="btn btn-secondary" id="btnStep2Back" onclick="goToStep(1)">戻る</button>
+      <button class="btn btn-secondary" id="btnStep5Back" onclick="goToStep(4)">戻る</button>
       <button class="btn btn-primary" id="btnGenerate" onclick="onGenerate()">生成する</button>
     </div>
     <div class="btn-row" id="closeButtons" style="display:none;">
@@ -228,14 +390,24 @@
 </div>
 
 <script>
+  var TOTAL_STEPS = 6;
+
   var state = {
     departments: [],
     selectedDept: null,
     dates: [],
-    selectedDates: []
+    selectedDates: [],
+    // 除外設定
+    staffForExclusion: [],
+    timeOptions: [],
+    allDayExclusions: {},
+    timeRangeExclusions: [],
+    tournamentExclusions: [],
+    // キャッシュ制御
+    lastLoadedDatesKey: null
   };
 
-  // 初期化: 部署一覧取得
+  // --- 初期化 ---
   google.script.run
     .withSuccessHandler(function(depts) {
       state.departments = depts;
@@ -250,11 +422,32 @@
     })
     .uiWizard_loadDepartments();
 
+  // --- ステップ制御 ---
   function updateStepIndicator(step) {
     document.getElementById('stepIndicator').textContent =
-      'ステップ ' + (step + 1) + '/3';
+      'ステップ ' + (step + 1) + '/' + TOTAL_STEPS;
   }
 
+  function goToStep(step) {
+    var steps = document.querySelectorAll('.step');
+    for (var i = 0; i < steps.length; i++) {
+      steps[i].classList.remove('active');
+    }
+    document.getElementById('step' + step).classList.add('active');
+    updateStepIndicator(step);
+
+    if (step === 1) {
+      loadDates();
+    } else if (step === 2) {
+      loadStaffForExclusion();
+    } else if (step === 4) {
+      renderTournamentPresets();
+    } else if (step === 5) {
+      renderConfirm();
+    }
+  }
+
+  // --- Step 0: 部署選択 ---
   function renderDeptList() {
     var ul = document.getElementById('deptList');
     ul.innerHTML = '';
@@ -287,22 +480,7 @@
     document.getElementById('btnStep0Next').disabled = false;
   }
 
-  function goToStep(step) {
-    // 非表示にする
-    var steps = document.querySelectorAll('.step');
-    for (var i = 0; i < steps.length; i++) {
-      steps[i].classList.remove('active');
-    }
-    document.getElementById('step' + step).classList.add('active');
-    updateStepIndicator(step);
-
-    if (step === 1) {
-      loadDates();
-    } else if (step === 2) {
-      renderConfirm();
-    }
-  }
-
+  // --- Step 1: 日付選択 ---
   function loadDates() {
     var dateList = document.getElementById('dateList');
     dateList.innerHTML = '';
@@ -332,13 +510,14 @@
       var li = document.createElement('li');
       li.setAttribute('data-value', d.dateValue);
       var label = document.createElement('label');
-      var cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = d.dateValue;
-      cb.onchange = (function(val, el) {
-        return function() { toggleDate(val, el, this.checked); };
+      var radio = document.createElement('input');
+      radio.type = 'radio';
+      radio.name = 'dateSelect';
+      radio.value = d.dateValue;
+      radio.onchange = (function(val, el) {
+        return function() { selectDate(val, el); };
       })(d.dateValue, li);
-      label.appendChild(cb);
+      label.appendChild(radio);
       label.appendChild(document.createTextNode(
         d.dateStr + ' (' + d.dayOfWeek + ')'));
       var span = document.createElement('span');
@@ -350,46 +529,371 @@
     }
   }
 
-  function toggleDate(val, liEl, checked) {
-    if (checked) {
-      if (state.selectedDates.indexOf(val) === -1) {
-        state.selectedDates.push(val);
-      }
-      liEl.classList.add('selected');
-    } else {
-      var idx = state.selectedDates.indexOf(val);
-      if (idx >= 0) state.selectedDates.splice(idx, 1);
-      liEl.classList.remove('selected');
-    }
-    document.getElementById('btnStep1Next').disabled = state.selectedDates.length === 0;
-  }
-
-  function selectAllDates() {
-    state.selectedDates = [];
-    var items = document.querySelectorAll('.date-list li');
-    for (var i = 0; i < items.length; i++) {
-      items[i].classList.add('selected');
-      var cb = items[i].querySelector('input[type="checkbox"]');
-      cb.checked = true;
-      state.selectedDates.push(cb.value);
-    }
-    document.getElementById('btnStep1Next').disabled = state.selectedDates.length === 0;
-  }
-
-  function deselectAllDates() {
-    state.selectedDates = [];
+  function selectDate(val, liEl) {
+    state.selectedDates = [val];
     var items = document.querySelectorAll('.date-list li');
     for (var i = 0; i < items.length; i++) {
       items[i].classList.remove('selected');
-      items[i].querySelector('input[type="checkbox"]').checked = false;
     }
-    document.getElementById('btnStep1Next').disabled = true;
+    liEl.classList.add('selected');
+    document.getElementById('btnStep1Next').disabled = false;
   }
 
+  // --- Step 2: 終日除外設定 ---
+  function loadStaffForExclusion() {
+    // 日付が変更されていなければキャッシュを使用
+    var currentKey = state.selectedDates.join(',');
+    if (state.lastLoadedDatesKey === currentKey) {
+      return;
+    }
+
+    document.getElementById('allDayContent').style.display = 'none';
+    document.getElementById('exclSpinner').classList.add('visible');
+    document.getElementById('btnStep2Next').disabled = true;
+
+    google.script.run
+      .withSuccessHandler(function(data) {
+        state.staffForExclusion = data.staffList;
+        state.timeOptions = data.timeOptions;
+        state.lastLoadedDatesKey = currentKey;
+
+        // 既存のallDayExclusionsを保持しつつ、新しいスタッフを初期化
+        var newExcl = {};
+        for (var i = 0; i < data.staffList.length; i++) {
+          var s = data.staffList[i];
+          if (state.allDayExclusions.hasOwnProperty(s.name)) {
+            newExcl[s.name] = state.allDayExclusions[s.name];
+          } else {
+            var isLeader = s.employment &&
+              (s.employment.indexOf('リーダー') !== -1 ||
+               s.employment.indexOf('サブリーダー') !== -1);
+            newExcl[s.name] = isLeader;
+          }
+        }
+        state.allDayExclusions = newExcl;
+
+        document.getElementById('exclSpinner').classList.remove('visible');
+        document.getElementById('allDayContent').style.display = 'block';
+        document.getElementById('btnStep2Next').disabled = false;
+        renderAllDayList();
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('exclSpinner').classList.remove('visible');
+        document.getElementById('allDayContent').style.display = 'block';
+        document.getElementById('allDayContent').innerHTML =
+          '<div style="color:#c5221f;">スタッフ情報の取得に失敗しました: ' + err.message + '</div>';
+      })
+      .uiWizard_loadStaffForExclusion({
+        departmentName: state.selectedDept,
+        dateValues: state.selectedDates
+      });
+  }
+
+  function renderAllDayList() {
+    var ul = document.getElementById('allDayList');
+    ul.innerHTML = '';
+    var onCount = 0;
+    for (var i = 0; i < state.staffForExclusion.length; i++) {
+      var s = state.staffForExclusion[i];
+      var isOn = state.allDayExclusions[s.name] || false;
+      if (isOn) onCount++;
+
+      var li = document.createElement('li');
+      li.className = 'staff-excl-item';
+      var label = document.createElement('label');
+      var cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = isOn;
+      cb.onchange = (function(name) {
+        return function() {
+          state.allDayExclusions[name] = this.checked;
+          updateAllDayCount();
+        };
+      })(s.name);
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(s.name));
+      if (s.employment) {
+        var badge = document.createElement('span');
+        badge.className = 'employment-badge';
+        if (s.employment.indexOf('サブリーダー') !== -1) {
+          badge.className += ' subleader';
+        } else if (s.employment.indexOf('リーダー') !== -1) {
+          badge.className += ' leader';
+        }
+        badge.textContent = s.employment;
+        label.appendChild(badge);
+      }
+      li.appendChild(label);
+      ul.appendChild(li);
+    }
+    updateAllDayCount();
+  }
+
+  function updateAllDayCount() {
+    var count = 0;
+    for (var name in state.allDayExclusions) {
+      if (state.allDayExclusions[name]) count++;
+    }
+    document.getElementById('allDayCount').textContent =
+      count + '名を終日除外';
+  }
+
+  function allDaySetAll(value) {
+    for (var i = 0; i < state.staffForExclusion.length; i++) {
+      state.allDayExclusions[state.staffForExclusion[i].name] = value;
+    }
+    renderAllDayList();
+  }
+
+  function allDaySetLeaders() {
+    for (var i = 0; i < state.staffForExclusion.length; i++) {
+      var s = state.staffForExclusion[i];
+      var isLeader = s.employment &&
+        (s.employment.indexOf('リーダー') !== -1 ||
+         s.employment.indexOf('サブリーダー') !== -1);
+      state.allDayExclusions[s.name] = isLeader;
+    }
+    renderAllDayList();
+  }
+
+  // --- Step 3: 時間帯除外設定 ---
+  function buildStaffOptions() {
+    var html = '<option value="">-- スタッフ --</option>';
+    for (var i = 0; i < state.staffForExclusion.length; i++) {
+      var name = state.staffForExclusion[i].name;
+      html += '<option value="' + escHtml(name) + '">' + escHtml(name) + '</option>';
+    }
+    return html;
+  }
+
+  function buildTimeOptions(staffName) {
+    var html = '<option value="-1">--:--</option>';
+    var staff = staffName ? getStaffByName(staffName) : null;
+    for (var i = 0; i < state.timeOptions.length; i++) {
+      var opt = state.timeOptions[i];
+      // スタッフが選択されている場合、シフト時間内のみ表示
+      if (staff && (opt.timeMin < staff.shiftStartMin || opt.timeMin > staff.shiftEndMin)) {
+        continue;
+      }
+      html += '<option value="' + opt.timeMin + '">' + opt.timeStr + '</option>';
+    }
+    return html;
+  }
+
+  function getStaffByName(name) {
+    for (var i = 0; i < state.staffForExclusion.length; i++) {
+      if (state.staffForExclusion[i].name === name) return state.staffForExclusion[i];
+    }
+    return null;
+  }
+
+  function escHtml(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function addTimeRange() {
+    state.timeRangeExclusions.push({ name: '', startMin: -1, endMin: -1 });
+    renderTimeRanges();
+  }
+
+  function removeTimeRange(idx) {
+    state.timeRangeExclusions.splice(idx, 1);
+    renderTimeRanges();
+  }
+
+  function updateTimeRange(idx, field, value) {
+    state.timeRangeExclusions[idx][field] = value;
+    if (field === 'name') {
+      // スタッフ変更時: 時刻プルダウンをシフト時間内に絞り直す
+      rebuildTimeDropdowns('timeRangeRows', idx, state.timeRangeExclusions[idx], 'updateTimeRange');
+    }
+    validateExclRow(document.getElementById('timeRangeRows').children[idx]);
+  }
+
+  function rebuildTimeDropdowns(containerId, idx, entry, updateFn) {
+    var rowEl = document.getElementById(containerId).children[idx];
+    var selects = rowEl.querySelectorAll('select');
+    var filteredOpts = buildTimeOptions(entry.name);
+    selects[1].innerHTML = filteredOpts;
+    selects[2].innerHTML = filteredOpts;
+    // 選択値がフィルタ後に存在しなければリセット
+    selects[1].value = entry.startMin;
+    if (String(selects[1].value) !== String(entry.startMin)) {
+      entry.startMin = -1;
+      selects[1].value = -1;
+    }
+    selects[2].value = entry.endMin;
+    if (String(selects[2].value) !== String(entry.endMin)) {
+      entry.endMin = -1;
+      selects[2].value = -1;
+    }
+  }
+
+  function renderTimeRanges() {
+    var container = document.getElementById('timeRangeRows');
+    container.innerHTML = '';
+    var staffOpts = buildStaffOptions();
+    for (var i = 0; i < state.timeRangeExclusions.length; i++) {
+      var tr = state.timeRangeExclusions[i];
+      var timeOpts = buildTimeOptions(tr.name);
+      var div = document.createElement('div');
+      div.className = 'excl-row';
+      div.innerHTML =
+        '<select onchange="updateTimeRange(' + i + ',\'name\',this.value)">' + staffOpts + '</select>' +
+        '<select onchange="updateTimeRange(' + i + ',\'startMin\',parseInt(this.value))">' + timeOpts + '</select>' +
+        '<span style="color:#888;">～</span>' +
+        '<select onchange="updateTimeRange(' + i + ',\'endMin\',parseInt(this.value))">' + timeOpts + '</select>' +
+        '<button class="remove-btn" onclick="removeTimeRange(' + i + ')" title="削除">×</button>';
+      var selects = div.querySelectorAll('select');
+      selects[0].value = tr.name;
+      selects[1].value = tr.startMin;
+      selects[2].value = tr.endMin;
+      container.appendChild(div);
+      validateExclRow(div);
+    }
+  }
+
+  // --- Step 4: 大会除外設定 ---
+  var TOURNAMENT_PRESETS = [
+    { label: '0部', startMin: 600, endMin: 720, weekendOnly: true },
+    { label: '1部', startMin: 750, endMin: 900, weekendOnly: false },
+    { label: '2部', startMin: 930, endMin: 1080, weekendOnly: false },
+    { label: '3部', startMin: 1110, endMin: 1260, weekendOnly: false }
+  ];
+
+  function hasWeekendSelected() {
+    for (var i = 0; i < state.selectedDates.length; i++) {
+      var d = new Date(state.selectedDates[i] + 'T00:00:00');
+      var day = d.getDay();
+      if (day === 0 || day === 6) return true;
+    }
+    return false;
+  }
+
+  function renderTournamentPresets() {
+    var container = document.getElementById('tournamentPresets');
+    var isWeekend = hasWeekendSelected();
+    var html = '<div class="preset-label">プリセットから追加:</div><div class="preset-btns">';
+    for (var i = 0; i < TOURNAMENT_PRESETS.length; i++) {
+      var p = TOURNAMENT_PRESETS[i];
+      if (p.weekendOnly && !isWeekend) continue;
+      html += '<button class="preset-btn" onclick="addTournamentFromPreset(' + i + ')">' +
+        p.label + ' (' + minToStr(p.startMin) + '～' + minToStr(p.endMin) + ')</button>';
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  function addTournamentFromPreset(presetIdx) {
+    var p = TOURNAMENT_PRESETS[presetIdx];
+    state.tournamentExclusions.push({ name: '', startMin: p.startMin, endMin: p.endMin });
+    renderTournaments();
+  }
+
+  function addTournament() {
+    state.tournamentExclusions.push({ name: '', startMin: -1, endMin: -1 });
+    renderTournaments();
+  }
+
+  function removeTournament(idx) {
+    state.tournamentExclusions.splice(idx, 1);
+    renderTournaments();
+  }
+
+  function updateTournament(idx, field, value) {
+    state.tournamentExclusions[idx][field] = value;
+    if (field === 'name') {
+      rebuildTimeDropdowns('tournamentRows', idx, state.tournamentExclusions[idx], 'updateTournament');
+    }
+    validateExclRow(document.getElementById('tournamentRows').children[idx]);
+  }
+
+  function renderTournaments() {
+    var container = document.getElementById('tournamentRows');
+    container.innerHTML = '';
+    var staffOpts = buildStaffOptions();
+    for (var i = 0; i < state.tournamentExclusions.length; i++) {
+      var t = state.tournamentExclusions[i];
+      var timeOpts = buildTimeOptions(t.name);
+      var div = document.createElement('div');
+      div.className = 'excl-row';
+      div.innerHTML =
+        '<select onchange="updateTournament(' + i + ',\'name\',this.value)">' + staffOpts + '</select>' +
+        '<select onchange="updateTournament(' + i + ',\'startMin\',parseInt(this.value))">' + timeOpts + '</select>' +
+        '<span style="color:#888;">～</span>' +
+        '<select onchange="updateTournament(' + i + ',\'endMin\',parseInt(this.value))">' + timeOpts + '</select>' +
+        '<button class="remove-btn" onclick="removeTournament(' + i + ')" title="削除">×</button>';
+      var selects = div.querySelectorAll('select');
+      selects[0].value = t.name;
+      selects[1].value = t.startMin;
+      selects[2].value = t.endMin;
+      container.appendChild(div);
+      validateExclRow(div);
+    }
+  }
+
+  // --- 共通バリデーション ---
+  function validateExclRow(rowEl) {
+    var selects = rowEl.querySelectorAll('select');
+    var start = parseInt(selects[1].value);
+    var end = parseInt(selects[2].value);
+    var existing = rowEl.querySelector('.range-error');
+    if (start >= 0 && end >= 0 && start >= end) {
+      if (!existing) {
+        var span = document.createElement('div');
+        span.className = 'range-error';
+        span.textContent = '開始時刻は終了時刻より前にしてください';
+        rowEl.appendChild(span);
+      }
+    } else if (existing) {
+      existing.remove();
+    }
+  }
+
+  // --- 有効なエントリのみ抽出 ---
+  function getValidTimeRanges() {
+    var valid = [];
+    for (var i = 0; i < state.timeRangeExclusions.length; i++) {
+      var tr = state.timeRangeExclusions[i];
+      if (tr.name && tr.startMin >= 0 && tr.endMin > tr.startMin) {
+        valid.push({ name: tr.name, startMin: tr.startMin, endMin: tr.endMin });
+      }
+    }
+    return valid;
+  }
+
+  function getValidTournaments() {
+    var valid = [];
+    for (var i = 0; i < state.tournamentExclusions.length; i++) {
+      var t = state.tournamentExclusions[i];
+      if (t.name && t.startMin >= 0 && t.endMin > t.startMin) {
+        valid.push({ name: t.name, startMin: t.startMin, endMin: t.endMin });
+      }
+    }
+    return valid;
+  }
+
+  function getAllDayNames() {
+    var names = [];
+    for (var name in state.allDayExclusions) {
+      if (state.allDayExclusions[name]) names.push(name);
+    }
+    return names;
+  }
+
+  // --- ヘルパー ---
+  function minToStr(min) {
+    var h = Math.floor(min / 60);
+    var m = min % 60;
+    return h + ':' + (m < 10 ? '0' + m : '' + m);
+  }
+
+  // --- Step 5: 確認＆生成 ---
   function renderConfirm() {
     document.getElementById('confirmDept').textContent = state.selectedDept;
 
-    // 選択日付の表示テキスト構築
+    // 日付
     var dateTexts = [];
     for (var i = 0; i < state.selectedDates.length; i++) {
       var val = state.selectedDates[i];
@@ -403,6 +907,39 @@
     document.getElementById('confirmDates').textContent =
       dateTexts.join(', ') + ' (' + dateTexts.length + '件)';
 
+    // 終日除外
+    var allDayNames = getAllDayNames();
+    document.getElementById('confirmAllDay').textContent =
+      allDayNames.length > 0
+        ? allDayNames.join(', ') + ' (' + allDayNames.length + '名)'
+        : 'なし';
+
+    // 時間帯除外
+    var validTR = getValidTimeRanges();
+    if (validTR.length > 0) {
+      var trTexts = [];
+      for (var t = 0; t < validTR.length; t++) {
+        trTexts.push(validTR[t].name + ' ' + minToStr(validTR[t].startMin) + '-' + minToStr(validTR[t].endMin));
+      }
+      document.getElementById('confirmTimeRanges').textContent =
+        trTexts.join(', ') + ' (' + validTR.length + '件)';
+    } else {
+      document.getElementById('confirmTimeRanges').textContent = 'なし';
+    }
+
+    // 大会除外
+    var validTT = getValidTournaments();
+    if (validTT.length > 0) {
+      var ttTexts = [];
+      for (var u = 0; u < validTT.length; u++) {
+        ttTexts.push(validTT[u].name + ' ' + minToStr(validTT[u].startMin) + '-' + minToStr(validTT[u].endMin));
+      }
+      document.getElementById('confirmTournaments').textContent =
+        ttTexts.join(', ') + ' (' + validTT.length + '件)';
+    } else {
+      document.getElementById('confirmTournaments').textContent = 'なし';
+    }
+
     // UIリセット
     document.getElementById('confirmArea').style.display = 'block';
     document.getElementById('generateSpinner').classList.remove('visible');
@@ -413,15 +950,19 @@
   }
 
   function onGenerate() {
-    // ボタン無効化＋スピナー表示
     document.getElementById('btnGenerate').disabled = true;
-    document.getElementById('btnStep2Back').disabled = true;
+    document.getElementById('btnStep5Back').disabled = true;
     document.getElementById('generateSpinner').classList.add('visible');
     document.getElementById('errorArea').classList.remove('visible');
 
     var params = {
       departmentName: state.selectedDept,
-      dateValues: state.selectedDates
+      dateValues: state.selectedDates,
+      exclusions: {
+        allDay: getAllDayNames(),
+        timeRanges: getValidTimeRanges(),
+        tournaments: getValidTournaments()
+      }
     };
 
     google.script.run
@@ -432,7 +973,7 @@
       .withFailureHandler(function(err) {
         document.getElementById('generateSpinner').classList.remove('visible');
         document.getElementById('btnGenerate').disabled = false;
-        document.getElementById('btnStep2Back').disabled = false;
+        document.getElementById('btnStep5Back').disabled = false;
         var errorArea = document.getElementById('errorArea');
         errorArea.textContent = '生成に失敗しました: ' + err.message;
         errorArea.classList.add('visible');

@@ -145,8 +145,30 @@ var PresetService = (function () {
     return windows;
   }
 
+  /**
+   * プリセットシートから無効な持ち場名の一覧を取得する。
+   * loadPresets() とは異なり、order/requiredLv の有無に関わらず
+   * 「有効」列が false の持ち場名をすべて返す。
+   *
+   * @param {string} presetSheetName - プリセットシート名
+   * @returns {string[]} 無効な持ち場名の配列
+   */
+  function getDisabledPostNames(presetSheetName) {
+    var data = SheetGateway.getValues(presetSheetName);
+    var disabled = [];
+    for (var i = 1; i < data.length; i++) {
+      var postName = String(data[i][0]).trim();
+      if (postName === '') continue;
+      if (!parseEnabled_(data[i][1])) {
+        disabled.push(postName);
+      }
+    }
+    return disabled;
+  }
+
   return {
     loadPresets: loadPresets,
+    getDisabledPostNames: getDisabledPostNames,
     // テスト用に内部関数も公開
     parseActiveWindows_: parseActiveWindows_,
     parseSortDir_: parseSortDir_

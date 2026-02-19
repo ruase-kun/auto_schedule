@@ -76,6 +76,13 @@ var Orchestrator = (function () {
     // 12. テンプレートコピー
     SheetGateway.copyTemplate(params.templateSheet, params.dateSheetName);
 
+    // 12.5. 無効な持ち場の列を削除（左詰め）
+    var disabledPostNames = PresetService.getDisabledPostNames(params.presetSheet);
+    removeDisabledPostColumns_(params.dateSheetName, posts, disabledPostNames);
+
+    // 12.6. 持ち場再検出（列削除後の正しいインデックスを取得）
+    posts = SheetGateway.detectPosts(params.dateSheetName);
+
     // 13. 休憩列書込み
     writeBreakColumn_(params.dateSheetName, breakAssignments, timeRows);
 
@@ -194,6 +201,38 @@ var Orchestrator = (function () {
       if (slots[i].rowNumber === null || slots[i].rowNumber === undefined) {
         slots[i].rowNumber = timeRows[timeRows.length - 1].rowNumber;
       }
+    }
+  }
+
+  /**
+   * 無効な持ち場の列を生成シートから削除する（右から左の順で削除）
+   *
+   * @param {string} sheetName - 生成シート名
+   * @param {Array<{name: string, colIndex: number}>} posts - テンプレートの持ち場一覧
+   * @param {PostPreset[]} presets - プリセット一覧（enabled=false を含む）
+   */
+  function removeDisabledPostColumns_(sheetName, posts, disabledPostNames) {
+    if (disabledPostNames.length === 0) return;
+
+    var disabledSet = {};
+    for (var i = 0; i < disabledPostNames.length; i++) {
+      disabledSet[disabledPostNames[i]] = true;
+    }
+
+    // 削除対象の列番号（1始まり）を収集
+    var colsToDelete = [];
+    for (var p = 0; p < posts.length; p++) {
+      if (disabledSet[posts[p].name]) {
+        colsToDelete.push(posts[p].colIndex + 1);
+      }
+    }
+    if (colsToDelete.length === 0) return;
+
+    // 右から左へ削除（インデックスずれ防止）
+    colsToDelete.sort(function (a, b) { return b - a; });
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    for (var d = 0; d < colsToDelete.length; d++) {
+      sheet.deleteColumn(colsToDelete[d]);
     }
   }
 

@@ -98,7 +98,7 @@ var UiWizardController = (function () {
 function showWizard() {
   var html = HtmlService.createHtmlOutputFromFile('WizardDialog')
     .setWidth(600)
-    .setHeight(500);
+    .setHeight(600);
   SpreadsheetApp.getUi().showModalDialog(html, '配置を生成する');
 }
 
@@ -213,6 +213,165 @@ function uiWizard_loadDates(departmentName) {
 }
 
 /**
+ * 除外設定用のスタッフ一覧と時刻オプションを返す（Step 2〜4 用）
+ * 選択日付の全出勤者をユニオン集合で取得し、雇用形態情報も付与する。
+ * @param {Object} params - { departmentName: string, dateValues: string[] }
+ * @returns {{staffList: Array<{name: string, employment: string}>, timeOptions: Array<{timeMin: number, timeStr: string}>}}
+ */
+function uiWizard_loadStaffForExclusion(params) {
+  var profiles = DepartmentService.loadProfiles();
+  var profile = DepartmentService.getProfileByName(profiles, params.departmentName);
+  if (!profile) throw new Error('部署が見つかりません: ' + params.departmentName);
+
+  uiWizard_ensureConfigSheet_(profile.configSheet, profile.templateSheet);
+  var config = ConfigService.loadConfig(profile.configSheet);
+  var skillData = SkillService.loadSkills(profile.skillSheet);
+
+  // 選択日付の全出勤者をユニオン集合で取得（シフト時間も保持）
+  var staffMap = {};
+  for (var i = 0; i < params.dateValues.length; i++) {
+    var date = new Date(params.dateValues[i] + 'T00:00:00');
+    var staffList = AttendanceService.getAttendees(
+      profile.extractSheet, date, config.shiftTimes);
+    SkillService.mergeEmployment(staffList, skillData.employmentMap);
+    for (var j = 0; j < staffList.length; j++) {
+      var s = staffList[j];
+      if (!staffMap[s.name]) {
+        staffMap[s.name] = {
+          employment: s.employment || '',
+          shiftStartMin: s.shiftStartMin,
+          shiftEndMin: s.shiftEndMin
+        };
+      } else {
+        // 複数日のシフト範囲を最大で取る（ユニオン）
+        if (s.shiftStartMin < staffMap[s.name].shiftStartMin) {
+          staffMap[s.name].shiftStartMin = s.shiftStartMin;
+        }
+        if (s.shiftEndMin > staffMap[s.name].shiftEndMin) {
+          staffMap[s.name].shiftEndMin = s.shiftEndMin;
+        }
+      }
+    }
+  }
+
+  var result = [];
+  var names = Object.keys(staffMap);
+  for (var k = 0; k < names.length; k++) {
+    var info = staffMap[names[k]];
+    result.push({
+      name: names[k],
+      employment: info.employment,
+      shiftStartMin: info.shiftStartMin,
+      shiftEndMin: info.shiftEndMin
+    });
+  }
+
+  // 雇用形態順でソート（リーダー→サブリーダー→社員→アルバイト→その他）、同一形態内は名前順
+  var employmentOrder = ['リーダー', 'サブリーダー', '社員', 'アルバイト'];
+  result.sort(function(a, b) {
+    var ai = employmentOrder.indexOf(a.employment);
+    var bi = employmentOrder.indexOf(b.employment);
+    if (ai === -1) ai = employmentOrder.length;
+    if (bi === -1) bi = employmentOrder.length;
+    if (ai !== bi) return ai - bi;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
+
+  // テンプレート時間行（時刻プルダウン用）
+  var timeRows = SheetGateway.getTimeRows(profile.templateSheet);
+  var timeOptions = [];
+  for (var t = 0; t < timeRows.length; t++) {
+    timeOptions.push({ timeMin: timeRows[t].timeMin, timeStr: timeRows[t].timeStr });
+  }
+  // 最終行+30分を追加（終了時刻用）
+  if (timeRows.length > 0) {
+    var lastMin = timeRows[timeRows.length - 1].timeMin + 30;
+    timeOptions.push({ timeMin: lastMin, timeStr: TimeUtils.minToTimeStr(lastMin) });
+  }
+
+  return { staffList: result, timeOptions: timeOptions };
+}
+
+/**
+ * 配置シートの各持ち場セルにプルダウン（データ入力規則）を設定する。
+ * 候補は「その時間帯に勤務中の全スタッフ」。勤務時間外のスタッフは含めない。
+ * 一括 setDataValidations で高速に設定する。
+ *
+ * @param {Object} params
+ * @param {string} params.dateSheetName - 日別配置表シート名
+ * @param {Staff[]} params.staffList - 出勤スタッフ一覧
+ * @param {TimeRow[]} params.timeRows - テンプレ時間行
+ * @param {Array<{name: string, colIndex: number}>} params.posts - 持ち場一覧
+ */
+function uiWizard_setPlacementDropdowns_(params) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(params.dateSheetName);
+  if (!sheet) return;
+  if (params.timeRows.length === 0 || params.posts.length === 0) return;
+
+  // 持ち場列の範囲（0始まり colIndex）
+  var firstPostCol = params.posts[0].colIndex;
+  var lastPostCol = params.posts[params.posts.length - 1].colIndex;
+  for (var pc = 0; pc < params.posts.length; pc++) {
+    if (params.posts[pc].colIndex < firstPostCol) firstPostCol = params.posts[pc].colIndex;
+    if (params.posts[pc].colIndex > lastPostCol) lastPostCol = params.posts[pc].colIndex;
+  }
+  var numCols = lastPostCol - firstPostCol + 1;
+
+  // colIndex → post マッピング
+  var postByCol = {};
+  for (var pi = 0; pi < params.posts.length; pi++) {
+    postByCol[params.posts[pi].colIndex] = params.posts[pi];
+  }
+
+  // 時間行の rowNumber → timeMin マッピング
+  var firstRow = params.timeRows[0].rowNumber;
+  var lastRow = params.timeRows[params.timeRows.length - 1].rowNumber;
+  var numRows = lastRow - firstRow + 1;
+  var timeMinByRow = {};
+  for (var ti = 0; ti < params.timeRows.length; ti++) {
+    timeMinByRow[params.timeRows[ti].rowNumber] = params.timeRows[ti].timeMin;
+  }
+
+  // 2次元バリデーション配列を構築
+  var rules = [];
+  for (var r = firstRow; r <= lastRow; r++) {
+    var rowRules = [];
+    var timeMin = timeMinByRow[r];
+    for (var c = firstPostCol; c <= lastPostCol; c++) {
+      // 時間行でない or 持ち場列でない → バリデーションなし
+      if (timeMin === undefined || !postByCol[c]) {
+        rowRules.push(null);
+        continue;
+      }
+
+      // 候補: その時間帯に勤務中の全スタッフ
+      var candidates = [];
+      for (var s = 0; s < params.staffList.length; s++) {
+        var staff = params.staffList[s];
+        if (staff.shiftStartMin <= timeMin && timeMin <= staff.shiftEndMin - 30) {
+          candidates.push(staff.name);
+        }
+      }
+
+      if (candidates.length > 0) {
+        rowRules.push(
+          SpreadsheetApp.newDataValidation()
+            .requireValueInList(candidates, true)
+            .setAllowInvalid(true)
+            .build()
+        );
+      } else {
+        rowRules.push(null);
+      }
+    }
+    rules.push(rowRules);
+  }
+
+  // 一括設定（1始まり列番号 = colIndex + 1）
+  sheet.getRange(firstRow, firstPostCol + 1, numRows, numCols).setDataValidations(rules);
+}
+
+/**
  * 選択日付ごとに配置生成＋個人シート＋履歴保存を実行する（Step 5 用）
  * @param {Object} params - { departmentName: string, dateValues: string[] }
  * @returns {{success: boolean, results: Array<{dateSheet: string, personalSheet: string, placementCount: number, staffCount: number}>}}
@@ -225,8 +384,25 @@ function uiWizard_generate(params) {
   // コンフィグシートが無ければテンプレートから自動生成
   uiWizard_ensureConfigSheet_(profile.configSheet, profile.templateSheet);
 
-  // 7A-1: 除外なし（空）
-  var exclusions = { allDay: {}, timeRanges: [], tournaments: [] };
+  // 除外情報をUIパラメータから構築
+  var exclusions = ExclusionService.createEmpty();
+  if (params.exclusions) {
+    if (params.exclusions.allDay && params.exclusions.allDay.length > 0) {
+      exclusions.allDay = ExclusionService.buildAllDaySet(params.exclusions.allDay);
+    }
+    if (params.exclusions.timeRanges) {
+      for (var e = 0; e < params.exclusions.timeRanges.length; e++) {
+        var tr = params.exclusions.timeRanges[e];
+        ExclusionService.addTimeRange(exclusions, tr.name, tr.startMin, tr.endMin);
+      }
+    }
+    if (params.exclusions.tournaments) {
+      for (var e2 = 0; e2 < params.exclusions.tournaments.length; e2++) {
+        var tt = params.exclusions.tournaments[e2];
+        ExclusionService.addTournament(exclusions, tt.name, tt.startMin, tt.endMin);
+      }
+    }
+  }
 
   // テンプレートヘッダーの持ち場色マップ（個人シート色塗り用）
   var postColorMap = SheetGateway.getPostColors(profile.templateSheet);
@@ -249,14 +425,17 @@ function uiWizard_generate(params) {
       dateSheetName: dateSheetName
     });
 
-    // 2. TimelineService.generate() — 個人シート生成
+    // 2. 各種データ読込（TimelineService + プルダウン + 診断で共用）
     var config = ConfigService.loadConfig(profile.configSheet);
     var staffList = AttendanceService.getAttendees(
       profile.extractSheet, date, config.shiftTimes);
-    SkillService.mergeEmployment(
-      staffList, SkillService.loadSkills(profile.skillSheet).employmentMap);
+    var skillData = SkillService.loadSkills(profile.skillSheet);
+    SkillService.mergeEmployment(staffList, skillData.employmentMap);
     var timeRows = SheetGateway.getTimeRows(profile.templateSheet);
+    var posts = SheetGateway.detectPosts(dateSheetName); // 生成シートから検出（無効列削除済み）
+    var presets = PresetService.loadPresets(profile.presetSheet);
 
+    // 3. TimelineService.generate() — 個人シート生成
     TimelineService.generate({
       dateSheetName: dateSheetName,
       staffList: staffList,
@@ -268,7 +447,15 @@ function uiWizard_generate(params) {
       postColorMap: postColorMap
     });
 
-    // 3. HistoryService.save() — JSON履歴保存
+    // 4. 配置シートにプルダウン設定（手動調整用）
+    uiWizard_setPlacementDropdowns_({
+      dateSheetName: dateSheetName,
+      staffList: staffList,
+      timeRows: timeRows,
+      posts: posts
+    });
+
+    // 5. HistoryService.save() — JSON履歴保存
     HistoryService.save({
       targetDate: date,
       department: params.departmentName,
@@ -281,8 +468,6 @@ function uiWizard_generate(params) {
     // 診断情報（0配置のときのみ収集）
     var diag = null;
     if (orchResult.placements.length === 0) {
-      var presets = PresetService.loadPresets(profile.presetSheet);
-      var skillData = SkillService.loadSkills(profile.skillSheet);
       var slotsLoaded = config.slots;
 
       // プリセットの持ち場名とスキルシートの持ち場名を比較
@@ -312,6 +497,15 @@ function uiWizard_generate(params) {
       staffCount: staffList.length,
       diag: diag
     });
+  }
+
+  // 生成シートを先頭に移動（日付シート→個人シートの順）
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  for (var m = results.length - 1; m >= 0; m--) {
+    var pSheet = ss.getSheetByName(results[m].personalSheet);
+    if (pSheet) { ss.setActiveSheet(pSheet); ss.moveActiveSheet(1); }
+    var dSheet = ss.getSheetByName(results[m].dateSheet);
+    if (dSheet) { ss.setActiveSheet(dSheet); ss.moveActiveSheet(1); }
   }
 
   return { success: true, results: results };
