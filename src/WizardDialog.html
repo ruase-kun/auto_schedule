@@ -403,6 +403,8 @@
     allDayExclusions: {},
     timeRangeExclusions: [],
     tournamentExclusions: [],
+    // 大会プリセット（サーバーから動的ロード）
+    tournamentPresets: [],
     // キャッシュ制御
     lastLoadedDatesKey: null
   };
@@ -555,6 +557,7 @@
       .withSuccessHandler(function(data) {
         state.staffForExclusion = data.staffList;
         state.timeOptions = data.timeOptions;
+        state.tournamentPresets = data.tournamentPresets || [];
         state.lastLoadedDatesKey = currentKey;
 
         // 既存のallDayExclusionsを保持しつつ、新しいスタッフを初期化
@@ -755,12 +758,6 @@
   }
 
   // --- Step 4: 大会除外設定 ---
-  var TOURNAMENT_PRESETS = [
-    { label: '0部', startMin: 600, endMin: 720, weekendOnly: true },
-    { label: '1部', startMin: 750, endMin: 900, weekendOnly: false },
-    { label: '2部', startMin: 930, endMin: 1080, weekendOnly: false },
-    { label: '3部', startMin: 1110, endMin: 1260, weekendOnly: false }
-  ];
 
   function hasWeekendSelected() {
     for (var i = 0; i < state.selectedDates.length; i++) {
@@ -773,10 +770,15 @@
 
   function renderTournamentPresets() {
     var container = document.getElementById('tournamentPresets');
+    var presets = state.tournamentPresets;
+    if (!presets || presets.length === 0) {
+      container.innerHTML = '<div class="preset-label" style="color:#888;">プリセットが未設定です（コンフィグ設定から追加できます）</div>';
+      return;
+    }
     var isWeekend = hasWeekendSelected();
     var html = '<div class="preset-label">プリセットから追加:</div><div class="preset-btns">';
-    for (var i = 0; i < TOURNAMENT_PRESETS.length; i++) {
-      var p = TOURNAMENT_PRESETS[i];
+    for (var i = 0; i < presets.length; i++) {
+      var p = presets[i];
       if (p.weekendOnly && !isWeekend) continue;
       html += '<button class="preset-btn" onclick="addTournamentFromPreset(' + i + ')">' +
         p.label + ' (' + minToStr(p.startMin) + '～' + minToStr(p.endMin) + ')</button>';
@@ -786,7 +788,7 @@
   }
 
   function addTournamentFromPreset(presetIdx) {
-    var p = TOURNAMENT_PRESETS[presetIdx];
+    var p = state.tournamentPresets[presetIdx];
     state.tournamentExclusions.push({ name: '', startMin: p.startMin, endMin: p.endMin });
     renderTournaments();
   }

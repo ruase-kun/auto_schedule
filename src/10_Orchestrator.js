@@ -21,11 +21,19 @@ var Orchestrator = (function () {
    * @returns {{placements: Placement[], breakAssignments: BreakAssignment[]}}
    */
   function run(params) {
+    // ログ配列作成
+    var log = [];
+    log.push('=== 配置プロセスログ ===');
+    log.push('生成日時: ' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm'));
+    log.push('');
+
     // 1. コンフィグ読込
     var config = ConfigService.loadConfig(params.configSheet);
 
-    // 2. プリセット読込
-    var presets = PresetService.loadPresets(params.presetSheet);
+    // 2. プリセット読込（config.postPresetsがあればJSON優先、なければ旧シートにフォールバック）
+    var presets = (config.postPresets && config.postPresets.length > 0)
+      ? PresetService.loadPresetsFromConfig(config.postPresets)
+      : PresetService.loadPresets(params.presetSheet);
 
     // 3. 出勤者抽出
     var staffList = AttendanceService.getAttendees(
@@ -38,8 +46,8 @@ var Orchestrator = (function () {
     // 5. 雇用形態結合
     SkillService.mergeEmployment(staffList, skillData.employmentMap);
 
-    // 6. 休憩割当
-    var breakAssignments = BreakService.assignBreaks(staffList, config, params.exclusions);
+    // 6. 休憩割当（Lv順ラウンドロビン）
+    var breakAssignments = BreakService.assignBreaks(staffList, config, params.exclusions, skillData.skills);
 
     // 7. テンプレ時間行取得
     var timeRows = SheetGateway.getTimeRows(params.templateSheet);
@@ -50,25 +58,146 @@ var Orchestrator = (function () {
     // 8. 持ち場検出
     var posts = SheetGateway.detectPosts(params.templateSheet);
 
-    // 9. 休憩前後除外行の事前計算
-    var breakExcludedRows = PlacementEngine.buildBreakExcludedRows(
-      breakAssignments, timeRows, config.breakExclusionMap
-    );
+    // 9. 休憩前後除外: バッファ指定ありならH6c、なければH6b
+    var useAutoBuffer = (config.breakBufferBefore > 0 || config.breakBufferAfter > 0);
+    var breakExcludedRows = useAutoBuffer
+      ? {}
+      : PlacementEngine.buildBreakExcludedRows(
+          breakAssignments, timeRows, config.breakExclusionMap
+        );
 
-    // 10. 配置生成
-    var placements = PlacementEngine.generate({
-      slots: config.slots,
-      presets: presets,
-      staffList: staffList,
-      skills: skillData.skills,
-      breakAssignments: breakAssignments,
-      breakDuration: config.breakDuration,
-      breakExcludedRows: breakExcludedRows,
-      exclusions: params.exclusions
-    });
+    // ログ: コンフィグサマリ
+    log.push('--- コンフィグ ---');
+    var isPerPost = config.placementMode === 'perPost';
+    if (isPerPost) {
+      log.push('配置モード: 個別配置');
+      var piNames = Object.keys(config.postIntervals);
+      var piDescs = [];
+      for (var pii = 0; pii < piNames.length; pii++) {
+        var koma = config.postIntervals[piNames[pii]];
+        piDescs.push(piNames[pii] + ': ' + koma + 'コマ(' + (koma * 30) + '分)');
+      }
+      if (piDescs.length > 0) log.push(piDescs.join(' | '));
+    } else {
+      log.push('配置モード: 一括配置');
+    }
+    var slotStrs = [];
+    for (var ls = 0; ls < config.slots.length; ls++) {
+      slotStrs.push(TimeUtils.minToTimeStr(config.slots[ls].startMin));
+    }
+    log.push('スロット(' + config.slots.length + '): ' + slotStrs.join(', '));
+    log.push('休憩: ' + config.breakDuration + '分 / バッファ前' + (config.breakBufferBefore || 0) + 'コマ 後' + (config.breakBufferAfter || 0) + 'コマ');
+    var shiftNames = Object.keys(config.shiftTimes);
+    var shiftDescs = [];
+    for (var lsi = 0; lsi < shiftNames.length; lsi++) {
+      var st = config.shiftTimes[shiftNames[lsi]];
+      shiftDescs.push(shiftNames[lsi] + '(' + TimeUtils.minToTimeStr(st.start) + '-' + TimeUtils.minToTimeStr(st.end) + ')');
+    }
+    log.push('シフト: ' + shiftDescs.join(' '));
+    log.push('');
 
-    // 10.5. 配置展開（1スロット→複数テンプレ行に展開）
-    placements = expandPlacements_(placements, config.slots, timeRows);
+    // ログ: スタッフ一覧
+    log.push('--- スタッフ(' + staffList.length + '名) ---');
+    var staffDescs = [];
+    for (var lst = 0; lst < staffList.length; lst++) {
+      var s = staffList[lst];
+      var empStr = s.employment || '?';
+      staffDescs.push(s.name + '[' + empStr + '] ' + s.shiftType + ' ' +
+        TimeUtils.minToTimeStr(s.shiftStartMin) + '-' + TimeUtils.minToTimeStr(s.shiftEndMin));
+    }
+    log.push(staffDescs.join(' | '));
+    log.push('');
+
+    // ログ: 除外情報
+    log.push('--- 除外 ---');
+    var allDayNames = Object.keys(params.exclusions.allDay);
+    log.push('終日: ' + (allDayNames.length > 0 ? allDayNames.join(', ') : 'なし'));
+    if (params.exclusions.timeRanges.length > 0) {
+      var trDescs = [];
+      for (var ltr = 0; ltr < params.exclusions.timeRanges.length; ltr++) {
+        var tr = params.exclusions.timeRanges[ltr];
+        trDescs.push(tr.name + ' ' + TimeUtils.minToTimeStr(tr.startMin) + '-' + TimeUtils.minToTimeStr(tr.endMin));
+      }
+      log.push('時間帯: ' + trDescs.join(', '));
+    } else {
+      log.push('時間帯: なし');
+    }
+    if (params.exclusions.tournaments.length > 0) {
+      var tnDescs = [];
+      for (var ltn = 0; ltn < params.exclusions.tournaments.length; ltn++) {
+        var tn = params.exclusions.tournaments[ltn];
+        tnDescs.push(tn.name + ' ' + TimeUtils.minToTimeStr(tn.startMin) + '-' + TimeUtils.minToTimeStr(tn.endMin));
+      }
+      log.push('大会: ' + tnDescs.join(', '));
+    } else {
+      log.push('大会: なし');
+    }
+    log.push('');
+
+    // ログ: 休憩割当結果
+    log.push('--- 休憩割当 ---');
+    var breakLabels = ['早朝前半', '早朝後半', 'AM前半', 'AM後半', 'PM前半', 'PM後半'];
+    for (var lb = 0; lb < breakAssignments.length; lb++) {
+      var ba = breakAssignments[lb];
+      var baTime = TimeUtils.minToTimeStr(ba.breakAtMin);
+      var baNames = ba.names.length > 0 ? ba.names.join(', ') : '(なし)';
+      log.push(breakLabels[lb] + '(' + baTime + '): ' + baNames);
+    }
+    log.push('');
+
+    // 10. 配置生成（logを渡す→PlacementEngine側で配置詳細を追記）
+    var placements;
+    var placementsBeforeExpand;
+
+    if (config.placementMode === 'perPost') {
+      // 個別配置モード: concurrentPost を無効化
+      var perPostPresets = [];
+      for (var pp = 0; pp < presets.length; pp++) {
+        var pCopy = {};
+        var pKeys = Object.keys(presets[pp]);
+        for (var pk = 0; pk < pKeys.length; pk++) {
+          pCopy[pKeys[pk]] = presets[pp][pKeys[pk]];
+        }
+        pCopy.concurrentPost = null;
+        perPostPresets.push(pCopy);
+      }
+
+      placements = PlacementEngine.generatePerPost({
+        timeRows: timeRows,
+        presets: perPostPresets,
+        staffList: staffList,
+        skills: skillData.skills,
+        breakAssignments: breakAssignments,
+        breakDuration: config.breakDuration,
+        breakExcludedRows: breakExcludedRows,
+        breakBufferBefore: config.breakBufferBefore,
+        breakBufferAfter: config.breakBufferAfter,
+        exclusions: params.exclusions,
+        postIntervals: config.postIntervals,
+        log: log
+      });
+      // generatePerPostは30分行単位で出力するため展開不要
+      placementsBeforeExpand = placements.length;
+    } else {
+      // 一括配置モード（従来通り）
+      placements = PlacementEngine.generate({
+        slots: config.slots,
+        presets: presets,
+        staffList: staffList,
+        skills: skillData.skills,
+        breakAssignments: breakAssignments,
+        breakDuration: config.breakDuration,
+        breakExcludedRows: breakExcludedRows,
+        breakBufferBefore: config.breakBufferBefore,
+        breakBufferAfter: config.breakBufferAfter,
+        exclusions: params.exclusions,
+        log: log
+      });
+
+      // 10.5. 配置展開（1スロット→複数テンプレ行に展開）
+      placementsBeforeExpand = placements.length;
+      placements = expandPlacements_(placements, config.slots, timeRows);
+    }
 
     // 11. 既存日付シート削除
     SheetGateway.deleteSheetIfExists(params.dateSheetName);
@@ -77,7 +206,9 @@ var Orchestrator = (function () {
     SheetGateway.copyTemplate(params.templateSheet, params.dateSheetName);
 
     // 12.5. 無効な持ち場の列を削除（左詰め）
-    var disabledPostNames = PresetService.getDisabledPostNames(params.presetSheet);
+    var disabledPostNames = (config.postPresets && config.postPresets.length > 0)
+      ? PresetService.getDisabledPostNamesFromConfig(config.postPresets)
+      : PresetService.getDisabledPostNames(params.presetSheet);
     removeDisabledPostColumns_(params.dateSheetName, posts, disabledPostNames);
 
     // 12.6. 持ち場再検出（列削除後の正しいインデックスを取得）
@@ -88,6 +219,12 @@ var Orchestrator = (function () {
 
     // 14. 配置結果書込み
     writePlacements_(params.dateSheetName, placements, posts);
+
+    // 15. ログサマリ＋ノート書込み
+    log.push('');
+    log.push('--- サマリ ---');
+    log.push('配置: ' + placementsBeforeExpand + '件(展開前)');
+    SheetGateway.setNote(params.dateSheetName, 1, 1, log.join('\n'));
 
     return {
       placements: placements,
@@ -300,7 +437,8 @@ var Orchestrator = (function () {
   }
 
   return {
-    run: run
+    run: run,
+    writePlacements_: writePlacements_
   };
 
 })();

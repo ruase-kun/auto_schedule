@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Meiryo', sans-serif;
+    font-size: 14px;
+    color: #333;
+    background: #fff;
+    padding: 20px;
+  }
+
+  .page { display: none; }
+  .page.active { display: block; }
+
+  .page-title {
+    font-size: 16px;
+    font-weight: bold;
+    margin-bottom: 8px;
+  }
+  .page-desc {
+    color: #666;
+    font-size: 13px;
+    margin-bottom: 12px;
+  }
+
+  /* スタッフ一覧 */
+  .staff-list {
+    list-style: none;
+    max-height: 320px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+  }
+  .staff-item {
+    padding: 8px 12px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .staff-item:last-child { border-bottom: none; }
+  .staff-item label {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+  }
+  .staff-item input[type="checkbox"] { margin-right: 8px; }
+  .employment-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    margin-left: 8px;
+    background: #f0f0f0;
+    color: #666;
+  }
+  .employment-badge.leader { background: #fff3e0; color: #e65100; }
+  .employment-badge.subleader { background: #e8f5e9; color: #2e7d32; }
+
+  .select-actions { margin-bottom: 8px; }
+  .select-actions a {
+    color: #4285f4;
+    cursor: pointer;
+    font-size: 13px;
+    margin-right: 12px;
+    text-decoration: none;
+  }
+  .select-actions a:hover { text-decoration: underline; }
+
+  .absent-count {
+    font-size: 12px;
+    color: #888;
+    margin-top: 6px;
+  }
+
+  /* ボタン */
+  .btn-row {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .btn {
+    padding: 8px 24px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #4285f4; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #3367d6; }
+  .btn-secondary { background: #f1f3f4; color: #333; }
+  .btn-secondary:hover:not(:disabled) { background: #e0e0e0; }
+  .btn-danger { background: #ea4335; color: #fff; }
+  .btn-danger:hover:not(:disabled) { background: #c5221f; }
+
+  /* スピナー */
+  .spinner-area {
+    text-align: center;
+    padding: 30px 0;
+  }
+  .spinner {
+    display: inline-block;
+    width: 32px;
+    height: 32px;
+    border: 3px solid #e0e0e0;
+    border-top-color: #4285f4;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner-text { margin-top: 10px; color: #666; }
+
+  /* 結果表示 */
+  .result-box {
+    background: #f8f9fa;
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 12px;
+  }
+  .result-title {
+    font-size: 15px;
+    font-weight: bold;
+    margin-bottom: 12px;
+  }
+  .result-title.success { color: #0d7d2c; }
+  .result-title.partial { color: #e65100; }
+  .result-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+    font-size: 13px;
+  }
+  .result-stat:last-child { border-bottom: none; }
+  .result-stat .label { color: #555; }
+  .result-stat .value { font-weight: bold; }
+
+  .unfilled-list {
+    margin-top: 10px;
+    font-size: 12px;
+    color: #c5221f;
+    max-height: 120px;
+    overflow-y: auto;
+  }
+  .unfilled-item { padding: 2px 0; }
+
+  /* エラー */
+  .error-msg {
+    background: #fce8e6;
+    color: #c5221f;
+    padding: 10px 12px;
+    border-radius: 4px;
+    margin-top: 12px;
+    display: none;
+    font-size: 13px;
+  }
+  .error-msg.visible { display: block; }
+</style>
+</head>
+<body>
+
+<!-- Page: Loading -->
+<div class="page active" id="pageLoading">
+  <div class="spinner-area">
+    <div class="spinner"></div>
+    <div class="spinner-text">配置済みスタッフを読み込み中...</div>
+  </div>
+</div>
+
+<!-- Page: Staff selection -->
+<div class="page" id="pageMain">
+  <div class="page-title">欠勤者を選択</div>
+  <div class="page-desc">欠勤するスタッフにチェックを入れてください。チェックした人の配置を空にし、浮きスタッフで穴埋めします。</div>
+
+  <div class="select-actions">
+    <a onclick="selectAll()">すべて選択</a>
+    <a onclick="deselectAll()">すべて解除</a>
+  </div>
+
+  <ul class="staff-list" id="staffList"></ul>
+  <div class="absent-count" id="absentCount">選択: 0名</div>
+
+  <div class="btn-row">
+    <button class="btn btn-secondary" onclick="google.script.host.close()">キャンセル</button>
+    <button class="btn btn-danger" id="btnExecute" onclick="execute()" disabled>実行する</button>
+  </div>
+
+  <div class="error-msg" id="errorMsg"></div>
+</div>
+
+<!-- Page: Executing -->
+<div class="page" id="pageExecuting">
+  <div class="spinner-area">
+    <div class="spinner"></div>
+    <div class="spinner-text">再配置を実行中...</div>
+  </div>
+</div>
+
+<!-- Page: Result -->
+<div class="page" id="pageResult">
+  <div class="result-box">
+    <div class="result-title" id="resultTitle"></div>
+    <div id="resultStats"></div>
+    <div class="unfilled-list" id="unfilledList"></div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-primary" onclick="google.script.host.close()">閉じる</button>
+  </div>
+</div>
+
+<script>
+  var staffData = [];
+
+  // --- Init ---
+  google.script.run
+    .withSuccessHandler(onStaffLoaded)
+    .withFailureHandler(onError)
+    .uiReplace_loadStaff();
+
+  function onStaffLoaded(data) {
+    staffData = data;
+    renderStaffList();
+    showPage('pageMain');
+  }
+
+  function onError(err) {
+    showPage('pageMain');
+    showError(err.message || String(err));
+  }
+
+  // --- Render ---
+  function renderStaffList() {
+    var ul = document.getElementById('staffList');
+    var html = '';
+    for (var i = 0; i < staffData.length; i++) {
+      var s = staffData[i];
+      var badgeClass = '';
+      if (s.employment === 'リーダー') badgeClass = ' leader';
+      else if (s.employment === 'サブリーダー') badgeClass = ' subleader';
+      html += '<li class="staff-item">' +
+        '<label><input type="checkbox" value="' + escapeHtml(s.name) + '" onchange="updateCount()">' +
+        escapeHtml(s.name) +
+        '<span class="employment-badge' + badgeClass + '">' + escapeHtml(s.employment) + '</span>' +
+        '</label></li>';
+    }
+    ul.innerHTML = html;
+  }
+
+  function updateCount() {
+    var checked = getCheckedNames();
+    document.getElementById('absentCount').textContent = '選択: ' + checked.length + '名';
+    document.getElementById('btnExecute').disabled = checked.length === 0;
+  }
+
+  // --- Actions ---
+  function selectAll() {
+    var cbs = document.querySelectorAll('#staffList input[type="checkbox"]');
+    for (var i = 0; i < cbs.length; i++) cbs[i].checked = true;
+    updateCount();
+  }
+
+  function deselectAll() {
+    var cbs = document.querySelectorAll('#staffList input[type="checkbox"]');
+    for (var i = 0; i < cbs.length; i++) cbs[i].checked = false;
+    updateCount();
+  }
+
+  function execute() {
+    var names = getCheckedNames();
+    if (names.length === 0) return;
+
+    showPage('pageExecuting');
+    google.script.run
+      .withSuccessHandler(onResult)
+      .withFailureHandler(onExecuteError)
+      .uiReplace_execute({ absentNames: names });
+  }
+
+  function onResult(result) {
+    var title = document.getElementById('resultTitle');
+    var stats = document.getElementById('resultStats');
+    var unfilledDiv = document.getElementById('unfilledList');
+
+    if (result.unfilledCount === 0) {
+      title.textContent = '再配置が完了しました';
+      title.className = 'result-title success';
+    } else {
+      title.textContent = '再配置が完了しました（一部未充填あり）';
+      title.className = 'result-title partial';
+    }
+
+    stats.innerHTML =
+      '<div class="result-stat"><span class="label">欠勤者</span><span class="value">' + escapeHtml(result.absentNames.join(', ')) + '</span></div>' +
+      '<div class="result-stat"><span class="label">ギャップ数</span><span class="value">' + result.gapCount + '</span></div>' +
+      '<div class="result-stat"><span class="label">充填数</span><span class="value">' + result.filledCount + '</span></div>' +
+      '<div class="result-stat"><span class="label">未充填数</span><span class="value">' + result.unfilledCount + '</span></div>';
+
+    if (result.unfilled && result.unfilled.length > 0) {
+      var uHtml = '<div style="font-weight:bold;margin-bottom:4px;">未充填の時間帯×持ち場:</div>';
+      for (var i = 0; i < result.unfilled.length; i++) {
+        var u = result.unfilled[i];
+        uHtml += '<div class="unfilled-item">' + u.timeStr + ' — ' + escapeHtml(u.postName) + '</div>';
+      }
+      unfilledDiv.innerHTML = uHtml;
+    } else {
+      unfilledDiv.innerHTML = '';
+    }
+
+    showPage('pageResult');
+  }
+
+  function onExecuteError(err) {
+    showPage('pageMain');
+    showError(err.message || String(err));
+  }
+
+  // --- Helpers ---
+  function getCheckedNames() {
+    var cbs = document.querySelectorAll('#staffList input[type="checkbox"]:checked');
+    var names = [];
+    for (var i = 0; i < cbs.length; i++) names.push(cbs[i].value);
+    return names;
+  }
+
+  function showPage(id) {
+    var pages = document.querySelectorAll('.page');
+    for (var i = 0; i < pages.length; i++) {
+      pages[i].classList.remove('active');
+    }
+    document.getElementById(id).classList.add('active');
+  }
+
+  function showError(msg) {
+    var el = document.getElementById('errorMsg');
+    el.textContent = msg;
+    el.classList.add('visible');
+  }
+
+  function escapeHtml(str) {
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+</script>
+
+</body>
+</html>

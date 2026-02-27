@@ -133,7 +133,10 @@ function uiWizard_ensureConfigSheet_(configSheetName, templateSheetName) {
   if (SheetGateway.sheetExists(configSheetName)) {
     try {
       var existing = SheetGateway.getValues(configSheetName);
-      // [シフト時間] セクションが存在すれば有効なコンフィグとみなす
+      // JSON形式: A1が{で始まれば有効とみなす
+      var a1 = String(existing[0][0]).trim();
+      if (a1.charAt(0) === '{') return;
+      // 旧形式: [シフト時間] セクションが存在すれば有効なコンフィグとみなす
       for (var chk = 0; chk < existing.length; chk++) {
         if (String(existing[chk][0]).trim() === '[シフト時間]') return;
       }
@@ -155,38 +158,35 @@ function uiWizard_ensureConfigSheet_(configSheetName, templateSheetName) {
     boundaries.push(TimeUtils.minToTimeStr(t));
   }
 
-  // 全行を5列に統一（setValuesは列数統一が必須）
-  var rows = [];
+  // JSON形式で生成
+  var defaultConfig = {
+    version: 1,
+    slotBoundaries: boundaries,
+    breakDuration: 60,
+    breakBufferBefore: 0,
+    breakBufferAfter: 0,
+    breakTimes: {
+      earlyFirst: '12:00', earlySecond: '13:00',
+      amFirst: '14:00', amSecond: '15:00',
+      pmFirst: '16:30', pmSecond: '17:30'
+    },
+    breakExclusionRows: {},
+    shiftTimes: {
+      '早朝': { start: '8:00', end: '17:00', pulldownStart: '10:00', pulldownEnd: '16:30' },
+      '午前': { start: '9:30', end: '18:00', pulldownStart: '10:00', pulldownEnd: '17:30' },
+      '午後': { start: '13:00', end: '22:00', pulldownStart: '13:30', pulldownEnd: '21:30' }
+    },
+    tournamentPresets: [
+      { label: '0部', startStr: '10:00', endStr: '12:00', weekendOnly: true },
+      { label: '1部', startStr: '12:30', endStr: '15:00', weekendOnly: false },
+      { label: '2部', startStr: '15:30', endStr: '18:00', weekendOnly: false },
+      { label: '3部', startStr: '18:30', endStr: '21:00', weekendOnly: false }
+    ]
+  };
 
-  // --- [コマ定義] --- 時間境界形式
-  rows.push(['[コマ定義]', '', '', '', '']);
-  for (var b = 0; b < boundaries.length; b++) {
-    rows.push([boundaries[b], '', '', '', '']);
-  }
-  rows.push(['', '', '', '', '']); // 空行区切り
-
-  // --- [休憩設定] ---
-  rows.push(['[休憩設定]', '', '', '', '']);
-  rows.push(['休憩時間(分)', 60, '', '', '']);
-  rows.push(['AM前半', '14:00', '', '', '']);
-  rows.push(['AM後半', '15:00', '', '', '']);
-  rows.push(['PM前半', '16:30', '', '', '']);
-  rows.push(['PM後半', '17:30', '', '', '']);
-  rows.push(['', '', '', '', '']); // 空行区切り
-
-  // --- [休憩除外行] ---
-  rows.push(['[休憩除外行]', '', '', '', '']);
-  rows.push(['', '', '', '', '']); // 空行区切り（除外なし）
-
-  // --- [シフト時間] ---
-  rows.push(['[シフト時間]', '', '', '', '']);
-  rows.push(['早朝', '8:00',  '17:00', '10:00', '16:30']);
-  rows.push(['午前', '9:30',  '18:00', '10:00', '17:30']);
-  rows.push(['午後', '13:00', '22:00', '13:30', '21:30']);
-
-  // シート作成＆書込み
+  // シート作成＆JSON書込み
   SpreadsheetApp.getActiveSpreadsheet().insertSheet(configSheetName);
-  SheetGateway.setValues(configSheetName, 1, 1, rows);
+  SheetGateway.setValues(configSheetName, 1, 1, [[JSON.stringify(defaultConfig)]]);
 }
 
 /**
@@ -289,7 +289,10 @@ function uiWizard_loadStaffForExclusion(params) {
     timeOptions.push({ timeMin: lastMin, timeStr: TimeUtils.minToTimeStr(lastMin) });
   }
 
-  return { staffList: result, timeOptions: timeOptions };
+  // 大会プリセット（コンフィグから動的取得）
+  var tournamentPresets = config.tournamentPresets || [];
+
+  return { staffList: result, timeOptions: timeOptions, tournamentPresets: tournamentPresets };
 }
 
 /**
@@ -433,7 +436,9 @@ function uiWizard_generate(params) {
     SkillService.mergeEmployment(staffList, skillData.employmentMap);
     var timeRows = SheetGateway.getTimeRows(profile.templateSheet);
     var posts = SheetGateway.detectPosts(dateSheetName); // 生成シートから検出（無効列削除済み）
-    var presets = PresetService.loadPresets(profile.presetSheet);
+    var presets = (config.postPresets && config.postPresets.length > 0)
+      ? PresetService.loadPresetsFromConfig(config.postPresets)
+      : PresetService.loadPresets(profile.presetSheet);
 
     // 3. TimelineService.generate() — 個人シート生成
     TimelineService.generate({
@@ -509,4 +514,523 @@ function uiWizard_generate(params) {
   }
 
   return { success: true, results: results };
+}
+
+/**
+ * プリセットシートから有効な持ち場名一覧を返す
+ * ConfigDialog で個別配置モードのUI構築に使用
+ * @param {string} deptName - 部署名
+ * @returns {string[]} 有効な持ち場名の配列
+ */
+function uiConfig_loadPostNames(deptName) {
+  var profiles = DepartmentService.loadProfiles();
+  var profile = DepartmentService.getProfileByName(profiles, deptName);
+  if (!profile) throw new Error('部署が見つかりません: ' + deptName);
+
+  // config JSONにpostPresetsがあればそちらから取得
+  uiWizard_ensureConfigSheet_(profile.configSheet, profile.templateSheet);
+  try {
+    var data = SheetGateway.getValues(profile.configSheet);
+    var a1 = String(data[0][0]).trim();
+    if (a1.charAt(0) === '{') {
+      var json = JSON.parse(a1);
+      if (json.postPresets && json.postPresets.length > 0) {
+        var names = [];
+        for (var i = 0; i < json.postPresets.length; i++) {
+          if (json.postPresets[i].enabled) {
+            names.push(json.postPresets[i].postName);
+          }
+        }
+        return names;
+      }
+    }
+  } catch (e) { /* フォールバック */ }
+
+  // フォールバック: 旧プリセットシートから取得
+  var presets = PresetService.loadPresets(profile.presetSheet);
+  var names2 = [];
+  for (var j = 0; j < presets.length; j++) {
+    if (presets[j].enabled) names2.push(presets[j].postName);
+  }
+  return names2;
+}
+
+/**
+ * テンプレートシートから持ち場名一覧を返す（ConfigDialog プリセットタブ用）
+ * @param {string} deptName - 部署名
+ * @returns {string[]} 持ち場名の配列
+ */
+function uiConfig_loadTemplatePostNames(deptName) {
+  var profiles = DepartmentService.loadProfiles();
+  var profile = DepartmentService.getProfileByName(profiles, deptName);
+  if (!profile) throw new Error('部署が見つかりません: ' + deptName);
+  var posts = SheetGateway.detectPosts(profile.templateSheet);
+  var names = [];
+  for (var i = 0; i < posts.length; i++) {
+    names.push(posts[i].name);
+  }
+  return names;
+}
+
+/* ---------- コンフィグ設定ダイアログ ---------- */
+
+/**
+ * コンフィグ設定ダイアログを表示する
+ */
+function showConfigDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ConfigDialog')
+    .setWidth(620)
+    .setHeight(560);
+  SpreadsheetApp.getUi().showModalDialog(html, 'コンフィグ設定');
+}
+
+/**
+ * 指定部署のコンフィグ設定をUI用データとして返す
+ * JSON形式ならそのままパースして返す。旧形式なら変換して返す。
+ * @param {string} deptName - 部署名
+ * @returns {Object} UI用コンフィグデータ
+ */
+function uiConfig_loadConfig(deptName) {
+  var profiles = DepartmentService.loadProfiles();
+  var profile = DepartmentService.getProfileByName(profiles, deptName);
+  if (!profile) throw new Error('部署が見つかりません: ' + deptName);
+
+  uiWizard_ensureConfigSheet_(profile.configSheet, profile.templateSheet);
+  var data = SheetGateway.getValues(profile.configSheet);
+  var a1 = String(data[0][0]).trim();
+
+  // JSON形式ならそのままUI用データとして返す（変換不要）
+  if (a1.charAt(0) === '{') {
+    var json = JSON.parse(a1);
+    return {
+      slotBoundaries: json.slotBoundaries || [],
+      breakDuration: json.breakDuration || 60,
+      breakBufferBefore: json.breakBufferBefore || 0,
+      breakBufferAfter: json.breakBufferAfter || 0,
+      breakTimes: json.breakTimes || {},
+      breakExclusionRows: json.breakExclusionRows || {},
+      shiftTimes: json.shiftTimes || {},
+      tournamentPresets: json.tournamentPresets || [],
+      placementMode: json.placementMode || 'global',
+      postIntervals: json.postIntervals || {},
+      postPresets: json.postPresets || []
+    };
+  }
+
+  // 旧形式 → 従来通り loadConfig → 分→H:MM変換 → UI用データ返却
+  var config = ConfigService.loadConfig(profile.configSheet);
+
+  var slotBoundaries = [];
+  for (var i = 0; i < config.slots.length; i++) {
+    slotBoundaries.push(TimeUtils.minToTimeStr(config.slots[i].startMin));
+  }
+
+  var bt = config.breakTimes;
+  var breakTimesStr = {
+    earlyFirst: TimeUtils.minToTimeStr(bt.earlyFirst),
+    earlySecond: TimeUtils.minToTimeStr(bt.earlySecond),
+    amFirst: TimeUtils.minToTimeStr(bt.amFirst),
+    amSecond: TimeUtils.minToTimeStr(bt.amSecond),
+    pmFirst: TimeUtils.minToTimeStr(bt.pmFirst),
+    pmSecond: TimeUtils.minToTimeStr(bt.pmSecond)
+  };
+
+  var shiftTimesStr = {};
+  var shiftNames = Object.keys(config.shiftTimes);
+  for (var s = 0; s < shiftNames.length; s++) {
+    var st = config.shiftTimes[shiftNames[s]];
+    shiftTimesStr[shiftNames[s]] = {
+      start: TimeUtils.minToTimeStr(st.start),
+      end: TimeUtils.minToTimeStr(st.end),
+      pulldownStart: TimeUtils.minToTimeStr(st.pulldownStart),
+      pulldownEnd: TimeUtils.minToTimeStr(st.pulldownEnd)
+    };
+  }
+
+  var presetsStr = [];
+  for (var p = 0; p < config.tournamentPresets.length; p++) {
+    var tp = config.tournamentPresets[p];
+    presetsStr.push({
+      label: tp.label,
+      startStr: TimeUtils.minToTimeStr(tp.startMin),
+      endStr: TimeUtils.minToTimeStr(tp.endMin),
+      weekendOnly: tp.weekendOnly
+    });
+  }
+
+  // breakExclusionRows を旧形式からも構築
+  var breakExclusionRows = {};
+  var exclKeys = Object.keys(config.breakExclusionMap || {});
+  for (var e = 0; e < exclKeys.length; e++) {
+    breakExclusionRows[exclKeys[e]] = config.breakExclusionMap[exclKeys[e]];
+  }
+
+  return {
+    slotBoundaries: slotBoundaries,
+    breakDuration: config.breakDuration,
+    breakBufferBefore: config.breakBufferBefore || 0,
+    breakBufferAfter: config.breakBufferAfter || 0,
+    breakTimes: breakTimesStr,
+    breakExclusionRows: breakExclusionRows,
+    shiftTimes: shiftTimesStr,
+    tournamentPresets: presetsStr,
+    placementMode: config.placementMode || 'global',
+    postIntervals: config.postIntervals || {},
+    postPresets: []
+  };
+}
+
+/**
+ * UIからのコンフィグデータをJSON形式で保存する
+ * UIから受け取ったstate.configをそのままJSON.stringifyしてシートに保存。
+ * @param {Object} params - { deptName: string, config: Object }
+ */
+function uiConfig_saveConfig(params) {
+  var profiles = DepartmentService.loadProfiles();
+  var profile = DepartmentService.getProfileByName(profiles, params.deptName);
+  if (!profile) throw new Error('部署が見つかりません: ' + params.deptName);
+
+  ConfigService.saveConfig(profile.configSheet, params.config);
+}
+
+/* ---------- 欠勤者再配置 ---------- */
+
+/**
+ * 欠勤者再配置ダイアログを表示する
+ */
+function showReplacementDialog() {
+  var html = HtmlService.createHtmlOutputFromFile('ReplacementDialog')
+    .setWidth(500)
+    .setHeight(500);
+  SpreadsheetApp.getUi().showModalDialog(html, '欠勤者再配置');
+}
+
+/**
+ * アクティブシート名からサフィックス部分を比較して部署を自動検出する
+ * 例: "02/20(木)_通販" → dateSheetSuffix="_通販" の部署にマッチ
+ *
+ * @param {string} sheetName - 日付シート名
+ * @param {DepartmentProfile[]} profiles - 部署プロファイル一覧
+ * @returns {DepartmentProfile|null}
+ */
+function detectDepartmentFromSheetName_(sheetName, profiles) {
+  // シート名から日付部分を除去してサフィックスを取得
+  // 日付部分は "MM/DD(曜)" 形式（9文字）
+  var datePartMatch = sheetName.match(/^\d{2}\/\d{2}\([日月火水木金土]\)/);
+  if (!datePartMatch) return null;
+  var suffix = sheetName.substring(datePartMatch[0].length);
+
+  // サフィックス付き部署を先に探す（完全一致）
+  for (var i = 0; i < profiles.length; i++) {
+    if (profiles[i].dateSheetSuffix && profiles[i].dateSheetSuffix === suffix) {
+      return profiles[i];
+    }
+  }
+  // サフィックスなし（空文字）の部署を返す
+  if (suffix === '') {
+    for (var j = 0; j < profiles.length; j++) {
+      if (!profiles[j].dateSheetSuffix) return profiles[j];
+    }
+  }
+  return profiles.length > 0 ? profiles[0] : null;
+}
+
+/**
+ * シート名からDateオブジェクトを生成する
+ * "02/20(木)" → 今年のその日付
+ *
+ * @param {string} sheetName - 日付シート名
+ * @returns {Date}
+ */
+function parseDateFromSheetName_(sheetName) {
+  var match = sheetName.match(/^(\d{2})\/(\d{2})\(/);
+  if (!match) throw new Error('日付シート形式ではありません: ' + sheetName);
+  var month = parseInt(match[1], 10);
+  var day = parseInt(match[2], 10);
+  var year = new Date().getFullYear();
+  return new Date(year, month - 1, day);
+}
+
+/**
+ * ポスト列の一括クリア（時間行のみ）
+ *
+ * @param {string} dateSheetName - 日付シート名
+ * @param {Array<{name: string, colIndex: number}>} posts - 持ち場一覧
+ * @param {TimeRow[]} timeRows - 時間行一覧
+ */
+function clearPostColumns_(dateSheetName, posts, timeRows) {
+  if (posts.length === 0 || timeRows.length === 0) return;
+
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(dateSheetName);
+  if (!sheet) return;
+
+  var firstPostCol = posts[0].colIndex;
+  var lastPostCol = posts[posts.length - 1].colIndex;
+  for (var p = 0; p < posts.length; p++) {
+    if (posts[p].colIndex < firstPostCol) firstPostCol = posts[p].colIndex;
+    if (posts[p].colIndex > lastPostCol) lastPostCol = posts[p].colIndex;
+  }
+  var numCols = lastPostCol - firstPostCol + 1;
+
+  // 各時間行のポスト列をクリア
+  for (var t = 0; t < timeRows.length; t++) {
+    var row = timeRows[t].rowNumber;
+    var emptyRow = [];
+    for (var c = 0; c < numCols; c++) emptyRow.push('');
+    sheet.getRange(row, firstPostCol + 1, 1, numCols).setValues([emptyRow]);
+  }
+}
+
+/**
+ * 欠勤者再配置: 初期データ読込（ダイアログ起動時）
+ * アクティブシートの配置済みスタッフ一覧を返す。
+ *
+ * @returns {Array<{name: string, employment: string}>}
+ */
+function uiReplace_loadStaff() {
+  var sheetName = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName();
+
+  // 日付シート形式チェック
+  if (!/^\d{2}\/\d{2}\(/.test(sheetName)) {
+    throw new Error('日付シートを開いた状態で実行してください（例: 02/20(木)）');
+  }
+
+  // 部署自動検出
+  var profiles = DepartmentService.loadProfiles();
+  var profile = detectDepartmentFromSheetName_(sheetName, profiles);
+  if (!profile) throw new Error('部署を検出できません: ' + sheetName);
+
+  // テンプレ時間行と持ち場を取得
+  var timeRows = SheetGateway.getTimeRows(sheetName);
+  var posts = SheetGateway.detectPosts(sheetName);
+
+  // シートデータ取得 → 配置読み取り → スタッフ抽出
+  var sheetData = SheetGateway.getValues(sheetName);
+  var placements = ReplacementEngine.readPlacementsFromSheet(sheetData, posts, timeRows);
+  var staffNames = ReplacementEngine.extractStaffFromPlacements(placements);
+
+  // 雇用形態情報を付与
+  var skillData = SkillService.loadSkills(profile.skillSheet);
+  var employmentOrder = ['リーダー', 'サブリーダー', '社員', 'アルバイト'];
+  var result = [];
+  for (var i = 0; i < staffNames.length; i++) {
+    var emp = skillData.employmentMap[staffNames[i]] || '';
+    result.push({ name: staffNames[i], employment: emp });
+  }
+
+  // 雇用形態順ソート
+  result.sort(function (a, b) {
+    var ai = employmentOrder.indexOf(a.employment);
+    var bi = employmentOrder.indexOf(b.employment);
+    if (ai === -1) ai = employmentOrder.length;
+    if (bi === -1) bi = employmentOrder.length;
+    if (ai !== bi) return ai - bi;
+    return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+  });
+
+  return result;
+}
+
+/**
+ * 欠勤者再配置: 実行
+ *
+ * @param {Object} params - { absentNames: string[] }
+ * @returns {Object} 結果サマリ
+ */
+function uiReplace_execute(params) {
+  var absentNames = params.absentNames;
+  if (!absentNames || absentNames.length === 0) {
+    throw new Error('欠勤者が選択されていません');
+  }
+
+  var sheetName = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet().getName();
+  if (!/^\d{2}\/\d{2}\(/.test(sheetName)) {
+    throw new Error('日付シートを開いた状態で実行してください');
+  }
+
+  // 1. 部署検出＋日付パース
+  var profiles = DepartmentService.loadProfiles();
+  var profile = detectDepartmentFromSheetName_(sheetName, profiles);
+  if (!profile) throw new Error('部署を検出できません: ' + sheetName);
+  var targetDate = parseDateFromSheetName_(sheetName);
+
+  // 2. config/presets/skills/staffList 読込
+  uiWizard_ensureConfigSheet_(profile.configSheet, profile.templateSheet);
+  var config = ConfigService.loadConfig(profile.configSheet);
+  var presets = (config.postPresets && config.postPresets.length > 0)
+    ? PresetService.loadPresetsFromConfig(config.postPresets)
+    : PresetService.loadPresets(profile.presetSheet);
+  var skillData = SkillService.loadSkills(profile.skillSheet);
+  var staffList = AttendanceService.getAttendees(
+    profile.extractSheet, targetDate, config.shiftTimes);
+  SkillService.mergeEmployment(staffList, skillData.employmentMap);
+
+  // 3. 日付シートから現在配置＋休憩割当を読取
+  var timeRows = SheetGateway.getTimeRows(sheetName);
+  var posts = SheetGateway.detectPosts(sheetName);
+  var sheetData = SheetGateway.getValues(sheetName);
+  var currentPlacements = ReplacementEngine.readPlacementsFromSheet(sheetData, posts, timeRows);
+  var breakAssignments = ReplacementEngine.readBreakAssignmentsFromSheet(sheetData, timeRows);
+
+  // 4. 欠勤者をallDay除外に設定
+  var exclusions = ExclusionService.createEmpty();
+  exclusions.allDay = ExclusionService.buildAllDaySet(absentNames);
+
+  // 5. 休憩前後除外の事前計算
+  var useAutoBuffer = (config.breakBufferBefore > 0 || config.breakBufferAfter > 0);
+  var breakExcludedRows = useAutoBuffer
+    ? {}
+    : PlacementEngine.buildBreakExcludedRows(
+        breakAssignments, timeRows, config.breakExclusionMap
+      );
+  var breakBufferPeriods = useAutoBuffer
+    ? PlacementEngine.buildBreakBufferPeriods_(
+        breakAssignments, timeRows,
+        config.breakBufferBefore, config.breakBufferAfter
+      )
+    : {};
+
+  // 6. プロセスログ構築開始
+  var log = [];
+  log.push('=== 再配置プロセスログ ===');
+  log.push('実行日時: ' + Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm'));
+  log.push('');
+
+  // ログ: 欠勤者
+  log.push('--- 欠勤者(' + absentNames.length + '名) ---');
+  log.push(absentNames.join(', '));
+  log.push('');
+
+  // ログ: 既存配置サマリ
+  log.push('--- 既存配置 ---');
+  log.push('配置数: ' + currentPlacements.length + '件');
+  var placedStaff = ReplacementEngine.extractStaffFromPlacements(currentPlacements);
+  log.push('配置済みスタッフ(' + placedStaff.length + '名): ' + placedStaff.join(', '));
+  log.push('');
+
+  // ログ: 休憩割当（シートから読取）
+  if (breakAssignments.length > 0) {
+    log.push('--- 休憩割当(シート読取) ---');
+    for (var bl = 0; bl < breakAssignments.length; bl++) {
+      var ba = breakAssignments[bl];
+      log.push(TimeUtils.minToTimeStr(ba.breakAtMin) + ': ' + ba.names.join(', '));
+    }
+    log.push('');
+  }
+
+  // ログ: スタッフ一覧（出勤者）
+  log.push('--- 出勤スタッフ(' + staffList.length + '名) ---');
+  var staffDescs = [];
+  for (var lsd = 0; lsd < staffList.length; lsd++) {
+    var sd = staffList[lsd];
+    var empStr = sd.employment || '?';
+    var absentMark = exclusions.allDay[sd.name] ? '[欠勤]' : '';
+    staffDescs.push(sd.name + '[' + empStr + '] ' + sd.shiftType + ' ' +
+      TimeUtils.minToTimeStr(sd.shiftStartMin) + '-' + TimeUtils.minToTimeStr(sd.shiftEndMin) +
+      absentMark);
+  }
+  log.push(staffDescs.join(' | '));
+  log.push('');
+
+  // identifyGaps → fillGaps（logを渡す）
+  var gapResult = ReplacementEngine.identifyGaps(currentPlacements, absentNames);
+
+  // ログ: ギャップ一覧
+  log.push('--- ギャップ(' + gapResult.gaps.length + '件) ---');
+  for (var gl = 0; gl < gapResult.gaps.length; gl++) {
+    var gp = gapResult.gaps[gl];
+    log.push(TimeUtils.minToTimeStr(gp.timeMin) + ' ' + gp.postName);
+  }
+  log.push('');
+
+  var fillResult = ReplacementEngine.fillGaps({
+    gaps: gapResult.gaps,
+    remaining: gapResult.remaining,
+    presets: presets,
+    staffList: staffList,
+    absentNames: absentNames,
+    skills: skillData.skills,
+    breakAssignments: breakAssignments,
+    breakDuration: config.breakDuration,
+    breakExcludedRows: breakExcludedRows,
+    breakBufferPeriods: breakBufferPeriods,
+    exclusions: exclusions,
+    log: log,
+    config: config,
+    timeRows: timeRows
+  });
+
+  // ログ: サマリ
+  log.push('');
+  log.push('--- サマリ ---');
+  log.push('ギャップ数: ' + gapResult.gaps.length);
+  log.push('充填数: ' + fillResult.filled.length);
+  log.push('未充填数: ' + fillResult.unfilled.length);
+  if (fillResult.unfilled.length > 0) {
+    log.push('--- 未充填 ---');
+    for (var u = 0; u < fillResult.unfilled.length; u++) {
+      var uf = fillResult.unfilled[u];
+      log.push(TimeUtils.minToTimeStr(uf.timeMin) + ' ' + uf.postName);
+    }
+  }
+
+  // 7. ポスト列クリア → 書込み
+  clearPostColumns_(sheetName, posts, timeRows);
+
+  // remaining + filled を結合して書込み
+  var allPlacements = gapResult.remaining.concat(fillResult.filled);
+  Orchestrator.writePlacements_(sheetName, allPlacements, posts);
+
+  // 8. A1ノートにプロセスログ追記
+  var existingNote = '';
+  try {
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    existingNote = sheet.getRange(1, 1).getNote() || '';
+  } catch (e) { /* ignore */ }
+  var newNote = existingNote
+    ? existingNote + '\n\n' + log.join('\n')
+    : log.join('\n');
+  SheetGateway.setNote(sheetName, 1, 1, newNote);
+
+  // 9. 個人シート再生成（欠勤者除外）
+  var postColorMap = SheetGateway.getPostColors(sheetName);
+  var activeStaffList = [];
+  var absentSet = {};
+  for (var as = 0; as < absentNames.length; as++) {
+    absentSet[absentNames[as]] = true;
+  }
+  for (var sl = 0; sl < staffList.length; sl++) {
+    if (!absentSet[staffList[sl].name]) {
+      activeStaffList.push(staffList[sl]);
+    }
+  }
+
+  TimelineService.generate({
+    dateSheetName: sheetName,
+    staffList: activeStaffList,
+    placements: allPlacements,
+    breakAssignments: breakAssignments,
+    breakDuration: config.breakDuration,
+    exclusions: exclusions,
+    timeRows: timeRows,
+    postColorMap: postColorMap
+  });
+
+  // 10. 結果サマリを返却
+  var unfilledSummary = [];
+  for (var uf2 = 0; uf2 < fillResult.unfilled.length; uf2++) {
+    var item = fillResult.unfilled[uf2];
+    unfilledSummary.push({
+      timeStr: TimeUtils.minToTimeStr(item.timeMin),
+      postName: item.postName
+    });
+  }
+
+  return {
+    absentNames: absentNames,
+    gapCount: gapResult.gaps.length,
+    filledCount: fillResult.filled.length,
+    unfilledCount: fillResult.unfilled.length,
+    unfilled: unfilledSummary
+  };
 }

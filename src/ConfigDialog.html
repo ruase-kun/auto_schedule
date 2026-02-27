@@ -1,0 +1,959 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', 'Meiryo', sans-serif;
+    font-size: 14px;
+    color: #333;
+    background: #fff;
+    padding: 16px;
+  }
+
+  /* 部署セレクタ */
+  .dept-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e0e0e0;
+  }
+  .dept-bar label { font-weight: bold; white-space: nowrap; }
+  .dept-bar select {
+    flex: 1;
+    padding: 6px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+
+  /* タブ */
+  .tabs {
+    display: flex;
+    border-bottom: 2px solid #e0e0e0;
+    margin-bottom: 16px;
+  }
+  .tab-btn {
+    padding: 8px 16px;
+    border: none;
+    background: none;
+    font-size: 13px;
+    cursor: pointer;
+    color: #666;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: #333; }
+  .tab-btn.active {
+    color: #4285f4;
+    border-bottom-color: #4285f4;
+    font-weight: bold;
+  }
+
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
+  /* フォーム要素 */
+  .form-group {
+    margin-bottom: 12px;
+  }
+  .form-group label {
+    display: block;
+    font-size: 13px;
+    color: #555;
+    margin-bottom: 4px;
+  }
+  .form-group select, .form-group input {
+    padding: 5px 8px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+
+  .section-title {
+    font-size: 13px;
+    font-weight: bold;
+    color: #444;
+    margin: 12px 0 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .inline-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .inline-group label {
+    font-size: 13px;
+    color: #555;
+    min-width: 60px;
+  }
+
+  /* コマ定義リスト */
+  .slot-list {
+    max-height: 200px;
+    overflow-y: auto;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    padding: 4px;
+  }
+  .slot-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .slot-row:last-child { border-bottom: none; }
+  .slot-row .slot-idx {
+    font-size: 12px;
+    color: #999;
+    min-width: 24px;
+  }
+  .slot-row .slot-arrow { color: #999; font-size: 13px; }
+  .slot-row .slot-end { font-size: 13px; color: #666; }
+  .slot-row .remove-btn {
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+    margin-left: auto;
+  }
+  .slot-row .remove-btn:hover { color: #ea4335; }
+
+  .add-btn {
+    background: none;
+    border: 1px dashed #4285f4;
+    color: #4285f4;
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 13px;
+    margin-top: 6px;
+  }
+  .add-btn:hover { background: #f0f4ff; }
+
+  /* プリセット行 */
+  .preset-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    margin-bottom: 6px;
+  }
+  .preset-row input[type="text"] { width: 60px; }
+  .preset-row .remove-btn {
+    background: none;
+    border: none;
+    color: #999;
+    font-size: 16px;
+    cursor: pointer;
+    padding: 0 4px;
+    margin-left: auto;
+  }
+  .preset-row .remove-btn:hover { color: #ea4335; }
+
+  /* ボタン行 */
+  .btn-row {
+    margin-top: 16px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 12px;
+    border-top: 1px solid #e0e0e0;
+  }
+  .btn {
+    padding: 8px 24px;
+    border: none;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: #4285f4; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #3367d6; }
+  .btn-secondary { background: #f1f3f4; color: #333; }
+  .btn-secondary:hover:not(:disabled) { background: #e0e0e0; }
+
+  /* メッセージ */
+  .save-msg {
+    color: #0d7d2c;
+    font-size: 13px;
+    margin-right: auto;
+    align-self: center;
+    display: none;
+  }
+  .save-msg.visible { display: block; }
+  .error-msg {
+    background: #fce8e6;
+    color: #c5221f;
+    padding: 8px 12px;
+    border-radius: 4px;
+    margin-top: 8px;
+    display: none;
+    font-size: 13px;
+  }
+  .error-msg.visible { display: block; }
+
+  /* 持ち場別間隔行 */
+  .post-interval-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .post-interval-row:last-child { border-bottom: none; }
+  .post-interval-row .post-name {
+    font-size: 13px;
+    min-width: 80px;
+    font-weight: 500;
+  }
+  .post-interval-row .interval-hint {
+    font-size: 12px;
+    color: #888;
+    min-width: 70px;
+  }
+
+  /* 配置プリセット行 */
+  .post-preset-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 13px;
+  }
+  .post-preset-row:last-child { border-bottom: none; }
+  .post-preset-row.disabled { opacity: 0.5; }
+  .post-preset-row .pp-name {
+    min-width: 70px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .post-preset-row select {
+    padding: 3px 4px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .post-preset-row input[type="number"] {
+    width: 48px;
+    padding: 3px 4px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .post-preset-row input[type="text"].pp-windows {
+    width: 120px;
+    padding: 3px 4px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .pp-label {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+  }
+
+  /* ローディング */
+  .loading-area {
+    text-align: center;
+    padding: 40px 0;
+    color: #666;
+  }
+  .spinner {
+    display: inline-block;
+    width: 28px;
+    height: 28px;
+    border: 3px solid #e0e0e0;
+    border-top-color: #4285f4;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner-text { margin-top: 8px; color: #666; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div id="loadingArea" class="loading-area">
+  <div class="spinner" style="margin: 0 auto;"></div>
+  <div class="spinner-text">読み込み中...</div>
+</div>
+
+<div id="mainContent" style="display:none;">
+
+  <!-- 部署セレクタ -->
+  <div class="dept-bar">
+    <label>部署:</label>
+    <select id="deptSelect" onchange="onDeptChange()"></select>
+  </div>
+
+  <!-- タブ -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab(0)">営業時間</button>
+    <button class="tab-btn" onclick="switchTab(1)">配置ペア</button>
+    <button class="tab-btn" onclick="switchTab(2)">休憩設定</button>
+    <button class="tab-btn" onclick="switchTab(3)">大会プリセット</button>
+    <button class="tab-btn" onclick="switchTab(4)">配置プリセット</button>
+  </div>
+
+  <!-- Tab 0: 営業時間（シフト時間） -->
+  <div class="tab-panel active" id="tab0">
+    <div id="shiftTimesArea"></div>
+  </div>
+
+  <!-- Tab 1: 配置ペア（コマ定義） -->
+  <div class="tab-panel" id="tab1">
+    <div class="form-group">
+      <label style="font-weight:bold;">配置方式:</label>
+      <div style="margin:6px 0 12px;">
+        <label style="display:inline-flex;align-items:center;gap:4px;margin-right:16px;cursor:pointer;">
+          <input type="radio" name="placementMode" value="global" onchange="onPlacementModeChange('global')">
+          一括配置（全持ち場同一間隔）
+        </label>
+        <label style="display:inline-flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="radio" name="placementMode" value="perPost" onchange="onPlacementModeChange('perPost')">
+          個別配置（持ち場別間隔）
+        </label>
+      </div>
+    </div>
+    <!-- 一括配置UI -->
+    <div id="globalModeArea">
+      <div class="form-group">
+        <label>時間境界（開始時刻の一覧）</label>
+        <div class="slot-list" id="slotList"></div>
+        <button class="add-btn" onclick="addSlotBoundary()">+ 境界を追加</button>
+      </div>
+    </div>
+    <!-- 個別配置UI -->
+    <div id="perPostModeArea" style="display:none;">
+      <div class="form-group">
+        <div id="perPostLoading" style="color:#888;font-size:13px;display:none;">持ち場名を読み込み中...</div>
+        <div class="slot-list" id="postIntervalList" style="max-height:300px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab 2: 休憩設定 -->
+  <div class="tab-panel" id="tab2">
+    <div class="form-group">
+      <label>休憩時間</label>
+      <div class="inline-group">
+        <select id="breakDuration" onchange="state.config.breakDuration=parseInt(this.value,10)">
+        </select>
+        <span style="color:#888;font-size:13px;">分</span>
+      </div>
+    </div>
+    <div class="form-group">
+      <div class="inline-group">
+        <label>休憩前バッファ:</label>
+        <select id="breakBufferBefore" onchange="state.config.breakBufferBefore=parseInt(this.value,10)">
+        </select>
+        <span style="color:#888;font-size:12px;">コマ（1コマ=30分, 0=H6b使用）</span>
+      </div>
+      <div class="inline-group">
+        <label>休憩後バッファ:</label>
+        <select id="breakBufferAfter" onchange="state.config.breakBufferAfter=parseInt(this.value,10)">
+        </select>
+        <span style="color:#888;font-size:12px;">コマ（1コマ=30分, 0=H6b使用）</span>
+      </div>
+    </div>
+    <div class="section-title">早朝シフト</div>
+    <div class="inline-group">
+      <label>早朝前半:</label>
+      <select id="bt_earlyFirst" onchange="state.config.breakTimes.earlyFirst=this.value"></select>
+      <label style="margin-left:12px;">早朝後半:</label>
+      <select id="bt_earlySecond" onchange="state.config.breakTimes.earlySecond=this.value"></select>
+    </div>
+    <div class="section-title">午前シフト</div>
+    <div class="inline-group">
+      <label>AM前半:</label>
+      <select id="bt_amFirst" onchange="state.config.breakTimes.amFirst=this.value"></select>
+      <label style="margin-left:12px;">AM後半:</label>
+      <select id="bt_amSecond" onchange="state.config.breakTimes.amSecond=this.value"></select>
+    </div>
+    <div class="section-title">午後シフト</div>
+    <div class="inline-group">
+      <label>PM前半:</label>
+      <select id="bt_pmFirst" onchange="state.config.breakTimes.pmFirst=this.value"></select>
+      <label style="margin-left:12px;">PM後半:</label>
+      <select id="bt_pmSecond" onchange="state.config.breakTimes.pmSecond=this.value"></select>
+    </div>
+  </div>
+
+  <!-- Tab 3: 大会プリセット -->
+  <div class="tab-panel" id="tab3">
+    <div id="presetList"></div>
+    <button class="add-btn" onclick="addPreset()">+ プリセットを追加</button>
+  </div>
+
+  <!-- Tab 4: 配置プリセット -->
+  <div class="tab-panel" id="tab4">
+    <div style="font-size:12px;color:#888;margin-bottom:8px;">
+      各持ち場の有効/無効、スキルレベル、配置順序、掛け持ち先を設定します。
+    </div>
+    <div class="slot-list" id="postPresetList" style="max-height:360px;"></div>
+  </div>
+
+  <!-- エラー -->
+  <div id="errorArea" class="error-msg"></div>
+
+  <!-- ボタン行 -->
+  <div class="btn-row">
+    <span class="save-msg" id="saveMsg">保存しました</span>
+    <button class="btn btn-secondary" onclick="google.script.host.close()">キャンセル</button>
+    <button class="btn btn-primary" id="btnSave" onclick="onSave()">保存</button>
+  </div>
+</div>
+
+<script>
+  // --- 時刻ヘルパー ---
+  function timeOptions(startHour, endHour, step) {
+    var opts = [];
+    for (var m = startHour * 60; m <= endHour * 60; m += step) {
+      var h = Math.floor(m / 60);
+      var mm = m % 60;
+      var str = (h < 10 ? '0' + h : '' + h) + ':' + (mm < 10 ? '0' + mm : '' + mm);
+      opts.push(str);
+    }
+    return opts;
+  }
+
+  function buildTimeSelect(options, selected) {
+    var html = '';
+    for (var i = 0; i < options.length; i++) {
+      html += '<option value="' + options[i] + '"' +
+        (options[i] === selected ? ' selected' : '') + '>' + options[i] + '</option>';
+    }
+    return html;
+  }
+
+  var TIME_OPTS = timeOptions(6, 23, 30);
+  var DURATION_OPTS = [30, 45, 60, 75, 90, 120];
+
+  // --- State ---
+  var state = {
+    departments: [],
+    selectedDept: null,
+    config: null,
+    postNames: [],  // 個別配置モード用の持ち場名一覧
+    templatePostNames: []  // テンプレートシートから検出した全持ち場名
+  };
+
+  // --- 初期化 ---
+  google.script.run
+    .withSuccessHandler(function(depts) {
+      state.departments = depts;
+      var sel = document.getElementById('deptSelect');
+      for (var i = 0; i < depts.length; i++) {
+        var opt = document.createElement('option');
+        opt.value = depts[i].name;
+        opt.textContent = depts[i].name;
+        sel.appendChild(opt);
+      }
+      if (depts.length > 0) {
+        state.selectedDept = depts[0].name;
+        loadConfig(depts[0].name);
+      }
+    })
+    .withFailureHandler(function(err) {
+      document.getElementById('loadingArea').innerHTML =
+        '<div style="color:#c5221f;">読み込みに失敗しました: ' + err.message + '</div>';
+    })
+    .uiWizard_loadDepartments();
+
+  function onDeptChange() {
+    var sel = document.getElementById('deptSelect');
+    state.selectedDept = sel.value;
+    loadConfig(sel.value);
+  }
+
+  function loadConfig(deptName) {
+    document.getElementById('loadingArea').style.display = 'block';
+    document.getElementById('mainContent').style.display = 'none';
+
+    var loaded = { config: null, postNames: null, templatePostNames: null };
+    function tryShow() {
+      if (loaded.config === null || loaded.postNames === null || loaded.templatePostNames === null) return;
+      state.config = loaded.config;
+      state.postNames = loaded.postNames;
+      state.templatePostNames = loaded.templatePostNames;
+      // デフォルト値の確保
+      if (!state.config.placementMode) state.config.placementMode = 'global';
+      if (!state.config.postIntervals) state.config.postIntervals = {};
+      if (!state.config.postPresets) state.config.postPresets = [];
+      // postPresetsが空の場合→テンプレート持ち場からデフォルト自動生成
+      if (state.config.postPresets.length === 0 && state.templatePostNames.length > 0) {
+        generateDefaultPresets();
+      }
+      renderAll();
+      document.getElementById('loadingArea').style.display = 'none';
+      document.getElementById('mainContent').style.display = 'block';
+    }
+
+    google.script.run
+      .withSuccessHandler(function(cfg) {
+        loaded.config = cfg;
+        tryShow();
+      })
+      .withFailureHandler(function(err) {
+        document.getElementById('loadingArea').innerHTML =
+          '<div style="color:#c5221f;">設定の読み込みに失敗しました: ' + err.message + '</div>';
+      })
+      .uiConfig_loadConfig(deptName);
+
+    google.script.run
+      .withSuccessHandler(function(names) {
+        loaded.postNames = names;
+        tryShow();
+      })
+      .withFailureHandler(function() {
+        loaded.postNames = [];
+        tryShow();
+      })
+      .uiConfig_loadPostNames(deptName);
+
+    google.script.run
+      .withSuccessHandler(function(names) {
+        loaded.templatePostNames = names;
+        tryShow();
+      })
+      .withFailureHandler(function() {
+        loaded.templatePostNames = [];
+        tryShow();
+      })
+      .uiConfig_loadTemplatePostNames(deptName);
+  }
+
+  // --- タブ ---
+  function switchTab(idx) {
+    var btns = document.querySelectorAll('.tab-btn');
+    var panels = document.querySelectorAll('.tab-panel');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].classList.toggle('active', i === idx);
+      panels[i].classList.toggle('active', i === idx);
+    }
+  }
+
+  // --- レンダリング ---
+  function renderAll() {
+    renderShiftTimes();
+    renderPlacementMode();
+    renderSlots();
+    renderPostIntervals();
+    renderBreakSettings();
+    renderPresets();
+    renderPostPresets();
+  }
+
+  // 配置モード
+  function renderPlacementMode() {
+    var mode = state.config.placementMode || 'global';
+    var radios = document.querySelectorAll('input[name="placementMode"]');
+    for (var i = 0; i < radios.length; i++) {
+      radios[i].checked = (radios[i].value === mode);
+    }
+    document.getElementById('globalModeArea').style.display = (mode === 'global') ? 'block' : 'none';
+    document.getElementById('perPostModeArea').style.display = (mode === 'perPost') ? 'block' : 'none';
+  }
+
+  function onPlacementModeChange(mode) {
+    state.config.placementMode = mode;
+    renderPlacementMode();
+    if (mode === 'perPost') {
+      renderPostIntervals();
+    }
+  }
+
+  // 個別配置: 持ち場別コマ数
+  function renderPostIntervals() {
+    var list = document.getElementById('postIntervalList');
+    var names = state.postNames || [];
+    var intervals = state.config.postIntervals || {};
+    if (names.length === 0) {
+      list.innerHTML = '<div style="color:#888;font-size:13px;padding:8px;">有効な持ち場がありません</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < names.length; i++) {
+      var postName = names[i];
+      var currentVal = intervals[postName] || 3;
+      html += '<div class="post-interval-row">';
+      html += '<span class="post-name">' + escHtml(postName) + '</span>';
+      html += '<select onchange="updatePostInterval(\'' + escHtml(postName).replace(/'/g, "\\'") + '\',parseInt(this.value,10))">';
+      for (var k = 1; k <= 12; k++) {
+        html += '<option value="' + k + '"' + (k === currentVal ? ' selected' : '') + '>' + k + '</option>';
+      }
+      html += '</select>';
+      html += '<span style="color:#888;font-size:13px;">コマ</span>';
+      html += '<span class="interval-hint">= ' + (currentVal * 30) + '分</span>';
+      html += '</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  function updatePostInterval(postName, koma) {
+    if (!state.config.postIntervals) state.config.postIntervals = {};
+    state.config.postIntervals[postName] = koma;
+    renderPostIntervals();
+  }
+
+  // Tab 0: 営業時間（シフト時間）
+  function renderShiftTimes() {
+    var area = document.getElementById('shiftTimesArea');
+    var st = state.config.shiftTimes;
+    var names = Object.keys(st);
+    var html = '';
+    for (var i = 0; i < names.length; i++) {
+      var n = names[i];
+      var v = st[n];
+      html += '<div class="section-title">' + n + 'シフト</div>';
+      html += '<div class="inline-group">';
+      html += '<label>勤務開始:</label><select onchange="state.config.shiftTimes[\'' + n + '\'].start=this.value">' +
+        buildTimeSelect(TIME_OPTS, v.start) + '</select>';
+      html += '<label style="margin-left:12px;">勤務終了:</label><select onchange="state.config.shiftTimes[\'' + n + '\'].end=this.value">' +
+        buildTimeSelect(TIME_OPTS, v.end) + '</select>';
+      html += '</div>';
+      html += '<div class="inline-group">';
+      html += '<label>PD開始:</label><select onchange="state.config.shiftTimes[\'' + n + '\'].pulldownStart=this.value">' +
+        buildTimeSelect(TIME_OPTS, v.pulldownStart) + '</select>';
+      html += '<label style="margin-left:12px;">PD終了:</label><select onchange="state.config.shiftTimes[\'' + n + '\'].pulldownEnd=this.value">' +
+        buildTimeSelect(TIME_OPTS, v.pulldownEnd) + '</select>';
+      html += '</div>';
+    }
+    area.innerHTML = html;
+  }
+
+  // Tab 1: 配置ペア（コマ定義）
+  function renderSlots() {
+    var list = document.getElementById('slotList');
+    var boundaries = state.config.slotBoundaries;
+    var html = '';
+    for (var i = 0; i < boundaries.length; i++) {
+      var endStr = (i + 1 < boundaries.length) ? boundaries[i + 1] : '--:--';
+      html += '<div class="slot-row">' +
+        '<span class="slot-idx">' + (i + 1) + '.</span>' +
+        '<select onchange="updateSlot(' + i + ',this.value)">' + buildTimeSelect(TIME_OPTS, boundaries[i]) + '</select>' +
+        '<span class="slot-arrow">&rarr;</span>' +
+        '<span class="slot-end">' + endStr + '</span>' +
+        '<button class="remove-btn" onclick="removeSlot(' + i + ')" title="削除">&times;</button>' +
+        '</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  function updateSlot(idx, value) {
+    state.config.slotBoundaries[idx] = value;
+    renderSlots();
+  }
+
+  function removeSlot(idx) {
+    state.config.slotBoundaries.splice(idx, 1);
+    renderSlots();
+  }
+
+  function addSlotBoundary() {
+    var boundaries = state.config.slotBoundaries;
+    var last = boundaries.length > 0 ? boundaries[boundaries.length - 1] : '10:00';
+    // 最後の境界+90分を追加
+    var parts = last.split(':');
+    var min = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10) + 90;
+    if (min > 23 * 60) min = 23 * 60;
+    var h = Math.floor(min / 60);
+    var m = min % 60;
+    var newTime = (h < 10 ? '0' + h : '' + h) + ':' + (m < 10 ? '0' + m : '' + m);
+    boundaries.push(newTime);
+    renderSlots();
+  }
+
+  var BUFFER_OPTS = [0, 1, 2, 3, 4, 5];
+
+  // Tab 2: 休憩設定
+  function renderBreakSettings() {
+    // 休憩時間
+    var durSel = document.getElementById('breakDuration');
+    var html = '';
+    for (var i = 0; i < DURATION_OPTS.length; i++) {
+      html += '<option value="' + DURATION_OPTS[i] + '"' +
+        (DURATION_OPTS[i] === state.config.breakDuration ? ' selected' : '') + '>' +
+        DURATION_OPTS[i] + '</option>';
+    }
+    durSel.innerHTML = html;
+
+    // バッファ（前後）
+    var bufBefore = state.config.breakBufferBefore || 0;
+    var bufAfter = state.config.breakBufferAfter || 0;
+    var bbSel = document.getElementById('breakBufferBefore');
+    var baSel = document.getElementById('breakBufferAfter');
+    var bbHtml = '';
+    var baHtml = '';
+    for (var b = 0; b < BUFFER_OPTS.length; b++) {
+      bbHtml += '<option value="' + BUFFER_OPTS[b] + '"' +
+        (BUFFER_OPTS[b] === bufBefore ? ' selected' : '') + '>' + BUFFER_OPTS[b] + '</option>';
+      baHtml += '<option value="' + BUFFER_OPTS[b] + '"' +
+        (BUFFER_OPTS[b] === bufAfter ? ' selected' : '') + '>' + BUFFER_OPTS[b] + '</option>';
+    }
+    bbSel.innerHTML = bbHtml;
+    baSel.innerHTML = baHtml;
+
+    // 各休憩時刻
+    var bt = state.config.breakTimes;
+    var keys = ['earlyFirst', 'earlySecond', 'amFirst', 'amSecond', 'pmFirst', 'pmSecond'];
+    for (var k = 0; k < keys.length; k++) {
+      var sel = document.getElementById('bt_' + keys[k]);
+      sel.innerHTML = buildTimeSelect(TIME_OPTS, bt[keys[k]]);
+    }
+  }
+
+  // Tab 3: 大会プリセット
+  function renderPresets() {
+    var list = document.getElementById('presetList');
+    var presets = state.config.tournamentPresets;
+    var html = '';
+    for (var i = 0; i < presets.length; i++) {
+      var p = presets[i];
+      html += '<div class="preset-row">' +
+        '<input type="text" value="' + escHtml(p.label) + '" onchange="updatePreset(' + i + ',\'label\',this.value)" placeholder="ラベル">' +
+        '<select onchange="updatePreset(' + i + ',\'startStr\',this.value)">' + buildTimeSelect(TIME_OPTS, p.startStr) + '</select>' +
+        '<span style="color:#888;">~</span>' +
+        '<select onchange="updatePreset(' + i + ',\'endStr\',this.value)">' + buildTimeSelect(TIME_OPTS, p.endStr) + '</select>' +
+        '<label style="font-size:12px;margin-left:4px;"><input type="checkbox"' +
+        (p.weekendOnly ? ' checked' : '') +
+        ' onchange="updatePreset(' + i + ',\'weekendOnly\',this.checked)"> 週末のみ</label>' +
+        '<button class="remove-btn" onclick="removePreset(' + i + ')" title="削除">&times;</button>' +
+        '</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  function updatePreset(idx, field, value) {
+    state.config.tournamentPresets[idx][field] = value;
+  }
+
+  function removePreset(idx) {
+    state.config.tournamentPresets.splice(idx, 1);
+    renderPresets();
+  }
+
+  function addPreset() {
+    state.config.tournamentPresets.push({
+      label: '',
+      startStr: '10:00',
+      endStr: '12:00',
+      weekendOnly: false
+    });
+    renderPresets();
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // --- 配置プリセット (Tab 4) ---
+
+  /**
+   * テンプレート持ち場からデフォルトプリセットを生成する
+   */
+  function generateDefaultPresets() {
+    var names = state.templatePostNames;
+    state.config.postPresets = [];
+    for (var i = 0; i < names.length; i++) {
+      state.config.postPresets.push({
+        postName: names[i],
+        enabled: true,
+        requiredLv: 1,
+        order: i + 1,
+        sortDir: 'DESC',
+        concurrentPost: null,
+        activeWindows: []
+      });
+    }
+  }
+
+  /**
+   * Tab 4 描画: 配置プリセット一覧
+   */
+  function renderPostPresets() {
+    var list = document.getElementById('postPresetList');
+    var presets = state.config.postPresets || [];
+    if (presets.length === 0) {
+      list.innerHTML = '<div style="color:#888;font-size:13px;padding:8px;">プリセットがありません</div>';
+      return;
+    }
+
+    // 掛け持ち先の選択肢を構築（全持ち場名）
+    var allNames = [];
+    for (var n = 0; n < presets.length; n++) {
+      allNames.push(presets[n].postName);
+    }
+
+    var html = '';
+    // ヘッダー
+    html += '<div style="display:flex;gap:6px;padding:4px 8px;font-size:11px;color:#888;border-bottom:1px solid #e0e0e0;">';
+    html += '<span style="min-width:24px;"></span>';
+    html += '<span style="min-width:70px;">持ち場</span>';
+    html += '<span style="min-width:48px;">Lv</span>';
+    html += '<span style="min-width:48px;">順序</span>';
+    html += '<span style="min-width:56px;">ソート</span>';
+    html += '<span style="min-width:80px;">掛け持ち先</span>';
+    html += '<span>有効時間帯</span>';
+    html += '</div>';
+
+    for (var i = 0; i < presets.length; i++) {
+      var p = presets[i];
+      var disabledClass = p.enabled ? '' : ' disabled';
+      html += '<div class="post-preset-row' + disabledClass + '">';
+
+      // チェックボックス（有効）
+      html += '<input type="checkbox"' + (p.enabled ? ' checked' : '') +
+        ' onchange="updatePostPreset(' + i + ',\'enabled\',this.checked)" title="有効/無効">';
+
+      // 持ち場名（readonly）
+      html += '<span class="pp-name">' + escHtml(p.postName) + '</span>';
+
+      // Lv (1-4 select)
+      html += '<select onchange="updatePostPreset(' + i + ',\'requiredLv\',parseInt(this.value,10))" style="width:48px;">';
+      for (var lv = 1; lv <= 4; lv++) {
+        html += '<option value="' + lv + '"' + (lv === p.requiredLv ? ' selected' : '') + '>' + lv + '</option>';
+      }
+      html += '</select>';
+
+      // 順序 (number)
+      html += '<input type="number" value="' + p.order + '" min="1" max="99" ' +
+        'onchange="updatePostPreset(' + i + ',\'order\',parseInt(this.value,10))">';
+
+      // ソート (ASC/DESC)
+      html += '<select onchange="updatePostPreset(' + i + ',\'sortDir\',this.value)" style="width:56px;">';
+      html += '<option value="DESC"' + (p.sortDir === 'DESC' ? ' selected' : '') + '>DESC</option>';
+      html += '<option value="ASC"' + (p.sortDir === 'ASC' ? ' selected' : '') + '>ASC</option>';
+      html += '</select>';
+
+      // 掛け持ち先 (他持ち場select + "なし")
+      html += '<select onchange="updatePostPreset(' + i + ',\'concurrentPost\',this.value===\'\'?null:this.value)" style="width:80px;">';
+      html += '<option value="">なし</option>';
+      for (var cn = 0; cn < allNames.length; cn++) {
+        if (allNames[cn] === p.postName) continue; // 自身は除外
+        var sel = (p.concurrentPost === allNames[cn]) ? ' selected' : '';
+        html += '<option value="' + escHtml(allNames[cn]) + '"' + sel + '>' + escHtml(allNames[cn]) + '</option>';
+      }
+      html += '</select>';
+
+      // 有効時間帯 (テキスト入力)
+      var winStr = formatActiveWindows(p.activeWindows || []);
+      html += '<input type="text" class="pp-windows" value="' + escHtml(winStr) + '" ' +
+        'placeholder="終日" ' +
+        'onchange="updatePostPresetWindows(' + i + ',this.value)" ' +
+        'title="例: 12:00-14:00,16:00-18:00（空=終日有効）">';
+
+      html += '</div>';
+    }
+    list.innerHTML = html;
+  }
+
+  /**
+   * プリセットフィールドを更新する
+   */
+  function updatePostPreset(idx, field, value) {
+    state.config.postPresets[idx][field] = value;
+    if (field === 'enabled') {
+      renderPostPresets();
+    }
+  }
+
+  /**
+   * activeWindows文字列をパースして更新する
+   */
+  function updatePostPresetWindows(idx, str) {
+    state.config.postPresets[idx].activeWindows = parseActiveWindowsStr(str);
+  }
+
+  /**
+   * activeWindows配列 → "12:00-14:00,16:00-18:00" 変換
+   */
+  function formatActiveWindows(windows) {
+    if (!windows || windows.length === 0) return '';
+    var parts = [];
+    for (var i = 0; i < windows.length; i++) {
+      var w = windows[i];
+      var startStr = w.startStr || minToTimeStr(w.startMin);
+      var endStr = w.endStr || minToTimeStr(w.endMin);
+      parts.push(startStr + '-' + endStr);
+    }
+    return parts.join(',');
+  }
+
+  /**
+   * "12:00-14:00,16:00-18:00" → activeWindows配列（UI形式: startStr/endStr）
+   */
+  function parseActiveWindowsStr(str) {
+    if (!str || str.trim() === '') return [];
+    var parts = str.split(',');
+    var windows = [];
+    for (var i = 0; i < parts.length; i++) {
+      var range = parts[i].trim();
+      if (range === '') continue;
+      var dash = range.indexOf('-');
+      if (dash === -1) continue;
+      var startStr = range.substring(0, dash).trim();
+      var endStr = range.substring(dash + 1).trim();
+      if (startStr && endStr) {
+        windows.push({ startStr: startStr, endStr: endStr });
+      }
+    }
+    return windows;
+  }
+
+  /**
+   * 分 → "H:MM" 変換（クライアント側ヘルパー）
+   */
+  function minToTimeStr(min) {
+    if (min === undefined || min === null) return '';
+    var h = Math.floor(min / 60);
+    var m = min % 60;
+    return h + ':' + (m < 10 ? '0' + m : '' + m);
+  }
+
+  // --- 保存 ---
+  function onSave() {
+    var btn = document.getElementById('btnSave');
+    btn.disabled = true;
+    btn.textContent = '保存中...';
+    document.getElementById('errorArea').classList.remove('visible');
+
+    google.script.run
+      .withSuccessHandler(function() {
+        btn.disabled = false;
+        btn.textContent = '保存';
+        var msg = document.getElementById('saveMsg');
+        msg.classList.add('visible');
+        setTimeout(function() { msg.classList.remove('visible'); }, 3000);
+      })
+      .withFailureHandler(function(err) {
+        btn.disabled = false;
+        btn.textContent = '保存';
+        var errArea = document.getElementById('errorArea');
+        errArea.textContent = '保存に失敗しました: ' + err.message;
+        errArea.classList.add('visible');
+      })
+      .uiConfig_saveConfig({ deptName: state.selectedDept, config: state.config });
+  }
+</script>
+</body>
+</html>

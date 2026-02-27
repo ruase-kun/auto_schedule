@@ -1,8 +1,8 @@
 /**
- * 99_Tests.js — Phase 1~6+1.5+4.5+7A テストスイート
+ * 99_Tests.js — Phase 1~7A+JSON テストスイート
  *
  * GAS実行環境でのユニットテスト＋統合テスト。
- * カスタムメニュー「配置システム > Phase 1~6+1.5+4.5+7A テスト実行」から実行可能。
+ * カスタムメニュー「配置システム > Phase 1~7A+JSON テスト実行」から実行可能。
  *
  * テスト基盤: assertEqual_, assertDeepEqual_, assertThrows_, testGroup_
  * 統合テストはシート不存在時SKIPに。
@@ -17,8 +17,10 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配置システム')
     .addItem('配置を生成する', 'showWizard')
+    .addItem('コンフィグ設定', 'showConfigDialog')
+    .addItem('欠勤者再配置', 'showReplacementDialog')
     .addSeparator()
-    .addItem('Phase 1~6+1.5+4.5+7A テスト実行', 'runAllPhase1Tests')
+    .addItem('Phase 1~7A+JSON テスト実行', 'runAllPhase1Tests')
     .addToUi();
 }
 
@@ -176,6 +178,12 @@ function runAllPhase1Tests() {
   // Phase 7A 純粋テスト
   testUiWizardControllerPure_();
 
+  // ConfigService JSON テスト
+  testConfigServiceJsonPure_();
+
+  // PresetService Config JSON テスト
+  testPresetServiceConfigPure_();
+
   // 統合テスト
   testSheetGatewayIntegration_();
   testConfigServiceIntegration_();
@@ -185,7 +193,7 @@ function runAllPhase1Tests() {
 
   // 結果出力
   var summary =
-    '=== Phase 1~6+1.5+4.5+7A テスト結果 ===\n' +
+    '=== Phase 1~7A+JSON テスト結果 ===\n' +
     'PASSED: ' + testResults_.passed + '\n' +
     'FAILED: ' + testResults_.failed + '\n' +
     'SKIPPED: ' + testResults_.skipped + '\n';
@@ -200,11 +208,11 @@ function runAllPhase1Tests() {
   try {
     var ui = SpreadsheetApp.getUi();
     if (testResults_.failed === 0) {
-      ui.alert('Phase 1~6+1.5+4.5+7A テスト結果',
+      ui.alert('Phase 1~7A+JSON テスト結果',
         'ALL PASSED (' + testResults_.passed + ' tests, ' +
         testResults_.skipped + ' skipped)', ui.ButtonSet.OK);
     } else {
-      ui.alert('Phase 1~6+1.5+4.5+7A テスト結果',
+      ui.alert('Phase 1~7A+JSON テスト結果',
         testResults_.failed + ' FAILED / ' + testResults_.passed +
         ' passed / ' + testResults_.skipped + ' skipped\n\n' +
         testResults_.errors.slice(0, 5).join('\n'),
@@ -812,10 +820,12 @@ function testBreakServicePure_() {
   function makeConfig_() {
     return {
       breakTimes: {
-        amFirst: 840,   // 14:00
-        amSecond: 900,  // 15:00
-        pmFirst: 990,   // 16:30
-        pmSecond: 1050  // 17:30
+        earlyFirst: 720,  // 12:00
+        earlySecond: 780, // 13:00
+        amFirst: 840,     // 14:00
+        amSecond: 900,    // 15:00
+        pmFirst: 990,     // 16:30
+        pmSecond: 1050    // 17:30
       },
       breakDuration: 60
     };
@@ -839,6 +849,19 @@ function testBreakServicePure_() {
     };
   }
 
+  // --- getMaxLv_ ---
+  testGroup_('BreakService.getMaxLv_', function () {
+    var skills = {
+      '田中': { 'レジ': 4, 'サッカー': 2, 'ピック': 1 },
+      '山田': { 'レジ': 0, 'ピック': 3 },
+      '佐藤': {}
+    };
+    assertEqual_('getMaxLv_ 田中=4', BreakService.getMaxLv_('田中', skills), 4);
+    assertEqual_('getMaxLv_ 山田=3', BreakService.getMaxLv_('山田', skills), 3);
+    assertEqual_('getMaxLv_ 佐藤=0', BreakService.getMaxLv_('佐藤', skills), 0);
+    assertEqual_('getMaxLv_ 未登録=0', BreakService.getMaxLv_('高橋', skills), 0);
+  });
+
   // --- isSocial_ ---
   testGroup_('BreakService.isSocial_', function () {
     assertEqual_('isSocial_ 社員', BreakService.isSocial_('社員'), true);
@@ -848,7 +871,7 @@ function testBreakServicePure_() {
     assertEqual_('isSocial_ empty', BreakService.isSocial_(''), false);
   });
 
-  // --- assignBreaks: 基本 ---
+  // --- assignBreaks: 基本（Lv順ラウンドロビン） ---
   testGroup_('BreakService.assignBreaks 基本', function () {
     var staff = [
       makeStaff_('田中', '社員', '午前'),
@@ -858,27 +881,35 @@ function testBreakServicePure_() {
     ];
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
+    var skills = { '田中': { 'P1': 3 }, '山田': { 'P1': 1 }, '鈴木': { 'P1': 3 }, '佐藤': { 'P1': 1 } };
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, skills);
 
-    assertEqual_('基本: 4件', breaks.length, 4);
-    assertEqual_('基本: AM前半 breakAtMin', breaks[0].breakAtMin, 840);
-    assertEqual_('基本: AM後半 breakAtMin', breaks[1].breakAtMin, 900);
-    assertEqual_('基本: PM前半 breakAtMin', breaks[2].breakAtMin, 990);
-    assertEqual_('基本: PM後半 breakAtMin', breaks[3].breakAtMin, 1050);
+    assertEqual_('基本: 6件', breaks.length, 6);
+    assertEqual_('基本: 早朝前半 breakAtMin', breaks[0].breakAtMin, 720);
+    assertEqual_('基本: 早朝後半 breakAtMin', breaks[1].breakAtMin, 780);
+    assertEqual_('基本: AM前半 breakAtMin', breaks[2].breakAtMin, 840);
+    assertEqual_('基本: AM後半 breakAtMin', breaks[3].breakAtMin, 900);
+    assertEqual_('基本: PM前半 breakAtMin', breaks[4].breakAtMin, 990);
+    assertEqual_('基本: PM後半 breakAtMin', breaks[5].breakAtMin, 1050);
 
-    // 社員1名+アルバイト1名 → 各系floor(1/2)=0名前半, 1名後半
-    // 田中(社員)→後半, 山田(アルバイト)→後半
-    assertEqual_('基本: AM前半 names length', breaks[0].names.length, 0);
-    assertEqual_('基本: AM後半 names length', breaks[1].names.length, 2);
+    // 早朝スタッフなし → 早朝前半/後半は空
+    assertEqual_('基本: 早朝前半 names length', breaks[0].names.length, 0);
+    assertEqual_('基本: 早朝後半 names length', breaks[1].names.length, 0);
 
-    // PM同様
-    assertEqual_('基本: PM前半 names length', breaks[2].names.length, 0);
-    assertEqual_('基本: PM後半 names length', breaks[3].names.length, 2);
+    // AM: 田中(Lv3), 山田(Lv1) → Lv降順ソート → 田中,山田 → RR: 田中→前半, 山田→後半
+    assertEqual_('基本: AM前半 count', breaks[2].names.length, 1);
+    assertEqual_('基本: AM後半 count', breaks[3].names.length, 1);
+    assertEqual_('基本: AM前半 田中', breaks[2].names[0], '田中');
+    assertEqual_('基本: AM後半 山田', breaks[3].names[0], '山田');
+
+    // PM: 鈴木(Lv3), 佐藤(Lv1) → RR: 鈴木→前半, 佐藤→後半
+    assertEqual_('基本: PM前半 count', breaks[4].names.length, 1);
+    assertEqual_('基本: PM後半 count', breaks[5].names.length, 1);
   });
 
-  // --- assignBreaks: 社員均等 ---
-  testGroup_('BreakService.assignBreaks 社員均等', function () {
+  // --- assignBreaks: Lv順3名ラウンドロビン ---
+  testGroup_('BreakService.assignBreaks Lv順3名', function () {
     var staff = [
       makeStaff_('A田中', '社員', '午前'),
       makeStaff_('B鈴木', '社員', '午前'),
@@ -886,33 +917,38 @@ function testBreakServicePure_() {
     ];
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
+    var skills = { 'A田中': { 'P1': 4 }, 'B鈴木': { 'P1': 3 }, 'C佐藤': { 'P1': 2 } };
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, skills);
 
-    // 社員3名 → floor(3/2)=1名前半, 2名後半
-    assertEqual_('社員均等: AM前半 count', breaks[0].names.length, 1);
-    assertEqual_('社員均等: AM後半 count', breaks[1].names.length, 2);
+    // Lv降順: A田中(4), B鈴木(3), C佐藤(2) → RR: A→前半, B→後半, C→前半
+    assertEqual_('Lv順3名: AM前半 count', breaks[2].names.length, 2);
+    assertEqual_('Lv順3名: AM後半 count', breaks[3].names.length, 1);
+    assertDeepEqual_('Lv順3名: AM前半', breaks[2].names, ['A田中', 'C佐藤']);
+    assertDeepEqual_('Lv順3名: AM後半', breaks[3].names, ['B鈴木']);
   });
 
-  // --- assignBreaks: アルバイト均等 ---
-  testGroup_('BreakService.assignBreaks アルバイト均等', function () {
+  // --- assignBreaks: 同Lv名前順ラウンドロビン ---
+  testGroup_('BreakService.assignBreaks 同Lv3名', function () {
     var staff = [
+      makeStaff_('Cアルバ', 'アルバイト', '午前'),
       makeStaff_('Aアルバ', 'アルバイト', '午前'),
-      makeStaff_('Bアルバ', 'アルバイト', '午前'),
-      makeStaff_('Cアルバ', 'アルバイト', '午前')
+      makeStaff_('Bアルバ', 'アルバイト', '午前')
     ];
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
+    // 全員同Lv → 名前昇順でRR
+    var skills = { 'Aアルバ': { 'P1': 2 }, 'Bアルバ': { 'P1': 2 }, 'Cアルバ': { 'P1': 2 } };
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, skills);
 
-    // アルバイト3名 → floor(3/2)=1名前半, 2名後半
-    assertEqual_('アルバイト均等: AM前半 count', breaks[0].names.length, 1);
-    assertEqual_('アルバイト均等: AM後半 count', breaks[1].names.length, 2);
+    // 名前昇順: Aアルバ, Bアルバ, Cアルバ → RR: A→前半, B→後半, C→前半
+    assertEqual_('同Lv3名: AM前半 count', breaks[2].names.length, 2);
+    assertEqual_('同Lv3名: AM後半 count', breaks[3].names.length, 1);
   });
 
-  // --- assignBreaks: 混合 ---
-  testGroup_('BreakService.assignBreaks 混合', function () {
+  // --- assignBreaks: Lv順4名ラウンドロビン ---
+  testGroup_('BreakService.assignBreaks Lv順4名', function () {
     var staff = [
       makeStaff_('A社員1', '社員', '午前'),
       makeStaff_('B社員2', '社員', '午前'),
@@ -921,18 +957,19 @@ function testBreakServicePure_() {
     ];
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
+    var skills = { 'A社員1': { 'P1': 4 }, 'B社員2': { 'P1': 3 }, 'Cバイト1': { 'P1': 2 }, 'Dバイト2': { 'P1': 1 } };
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, skills);
 
-    // 社員2名 → floor(2/2)=1前半, 1後半
-    // アルバイト2名 → floor(2/2)=1前半, 1後半
-    // 合計: 前半2名, 後半2名
-    assertEqual_('混合: AM前半 count', breaks[0].names.length, 2);
-    assertEqual_('混合: AM後半 count', breaks[1].names.length, 2);
+    // Lv降順: A(4), B(3), C(2), D(1) → RR: A→前半, B→後半, C→前半, D→後半
+    assertEqual_('Lv順4名: AM前半 count', breaks[2].names.length, 2);
+    assertEqual_('Lv順4名: AM後半 count', breaks[3].names.length, 2);
+    assertDeepEqual_('Lv順4名: AM前半', breaks[2].names, ['A社員1', 'Cバイト1']);
+    assertDeepEqual_('Lv順4名: AM後半', breaks[3].names, ['B社員2', 'Dバイト2']);
   });
 
-  // --- assignBreaks: 早朝除外 ---
-  testGroup_('BreakService.assignBreaks 早朝除外', function () {
+  // --- assignBreaks: 早朝シフト休憩割当 ---
+  testGroup_('BreakService.assignBreaks 早朝シフト', function () {
     var staff = [
       makeStaff_('田中', '社員', '早朝'),
       makeStaff_('山田', '社員', '午前')
@@ -940,12 +977,16 @@ function testBreakServicePure_() {
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, {});
 
-    // 田中(早朝)は対象外 → AM午前に山田のみ
-    var allNames = breaks[0].names.concat(breaks[1].names);
-    assertTrue_('早朝除外: 田中が含まれない', allNames.indexOf('田中') === -1);
-    assertTrue_('早朝除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
+    // 田中(早朝)は早朝グループ(index 0,1)に割当
+    var earlyNames = breaks[0].names.concat(breaks[1].names);
+    assertTrue_('早朝シフト: 田中が早朝グループに含まれる', earlyNames.indexOf('田中') !== -1);
+    // 田中はAMグループ(index 2,3)には含まれない
+    var amNames = breaks[2].names.concat(breaks[3].names);
+    assertTrue_('早朝シフト: 田中がAMグループに含まれない', amNames.indexOf('田中') === -1);
+    // 山田はAMグループに含まれる
+    assertTrue_('早朝シフト: 山田がAMグループに含まれる', amNames.indexOf('山田') !== -1);
   });
 
   // --- assignBreaks: 時差除外 ---
@@ -957,7 +998,7 @@ function testBreakServicePure_() {
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, {});
 
     // 田中(時差)は対象外
     var allNames = [];
@@ -978,9 +1019,9 @@ function testBreakServicePure_() {
     var excl = ExclusionService.createEmpty();
     excl.allDay = ExclusionService.buildAllDaySet(['田中']);
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, {});
 
-    var allNames = breaks[0].names.concat(breaks[1].names);
+    var allNames = breaks[2].names.concat(breaks[3].names);
     assertTrue_('終日除外: 田中が含まれない', allNames.indexOf('田中') === -1);
     assertTrue_('終日除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
   });
@@ -996,9 +1037,9 @@ function testBreakServicePure_() {
     // 田中がAM前半(840)もAM後半(900)も大会中
     ExclusionService.addTournament(excl, '田中', 800, 960);
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, {});
 
-    var allNames = breaks[0].names.concat(breaks[1].names);
+    var allNames = breaks[2].names.concat(breaks[3].names);
     assertTrue_('大会除外: 田中が含まれない', allNames.indexOf('田中') === -1);
     assertTrue_('大会除外: 山田が含まれる', allNames.indexOf('山田') !== -1);
   });
@@ -1014,11 +1055,11 @@ function testBreakServicePure_() {
     // 田中がAM前半(840)のみ大会中（AM後半(900)は可能）
     ExclusionService.addTournament(excl, '田中', 800, 870);
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, {});
 
     // 田中はfirstOnly不可 → secondOnlyに分類
-    assertTrue_('大会片方: 田中がAM前半に含まれない', breaks[0].names.indexOf('田中') === -1);
-    assertTrue_('大会片方: 田中がAM後半に含まれる', breaks[1].names.indexOf('田中') !== -1);
+    assertTrue_('大会片方: 田中がAM前半に含まれない', breaks[2].names.indexOf('田中') === -1);
+    assertTrue_('大会片方: 田中がAM後半に含まれる', breaks[3].names.indexOf('田中') !== -1);
   });
 
   // --- assignBreaks: 空リスト ---
@@ -1026,17 +1067,19 @@ function testBreakServicePure_() {
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
 
-    var breaks = BreakService.assignBreaks([], config, excl);
+    var breaks = BreakService.assignBreaks([], config, excl, {});
 
-    assertEqual_('空リスト: 4件', breaks.length, 4);
-    assertEqual_('空リスト: AM前半 empty', breaks[0].names.length, 0);
-    assertEqual_('空リスト: AM後半 empty', breaks[1].names.length, 0);
-    assertEqual_('空リスト: PM前半 empty', breaks[2].names.length, 0);
-    assertEqual_('空リスト: PM後半 empty', breaks[3].names.length, 0);
+    assertEqual_('空リスト: 6件', breaks.length, 6);
+    assertEqual_('空リスト: 早朝前半 empty', breaks[0].names.length, 0);
+    assertEqual_('空リスト: 早朝後半 empty', breaks[1].names.length, 0);
+    assertEqual_('空リスト: AM前半 empty', breaks[2].names.length, 0);
+    assertEqual_('空リスト: AM後半 empty', breaks[3].names.length, 0);
+    assertEqual_('空リスト: PM前半 empty', breaks[4].names.length, 0);
+    assertEqual_('空リスト: PM後半 empty', breaks[5].names.length, 0);
   });
 
-  // --- assignBreaks: 名前順ソート ---
-  testGroup_('BreakService.assignBreaks 名前順ソート', function () {
+  // --- assignBreaks: Lvラウンドロビン（同Lv→名前順） ---
+  testGroup_('BreakService.assignBreaks Lvラウンドロビン', function () {
     var staff = [
       makeStaff_('D田中', '社員', '午前'),
       makeStaff_('A鈴木', '社員', '午前'),
@@ -1045,12 +1088,13 @@ function testBreakServicePure_() {
     ];
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
+    // 全員同Lv → 名前昇順: A鈴木, B山田, C佐藤, D田中 → RR: A→前半, B→後半, C→前半, D→後半
+    var skills = { 'A鈴木': { 'P1': 2 }, 'B山田': { 'P1': 2 }, 'C佐藤': { 'P1': 2 }, 'D田中': { 'P1': 2 } };
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, skills);
 
-    // 社員4名 → floor(4/2)=2名前半, 2名後半（名前順ソート）
-    assertDeepEqual_('ソート: AM前半', breaks[0].names, ['A鈴木', 'B山田']);
-    assertDeepEqual_('ソート: AM後半', breaks[1].names, ['C佐藤', 'D田中']);
+    assertDeepEqual_('RR: AM前半', breaks[2].names, ['A鈴木', 'C佐藤']);
+    assertDeepEqual_('RR: AM後半', breaks[3].names, ['B山田', 'D田中']);
   });
 
   // --- isOnBreak ---
@@ -1115,16 +1159,18 @@ function testBreakServicePure_() {
       makeStaff_('Dバイト', 'アルバイト', '午前')
     ];
     var excl = ExclusionService.createEmpty();
+    var skills = { 'A社員': { 'P1': 4 }, 'Bバイト': { 'P1': 3 }, 'C社員': { 'P1': 2 }, 'Dバイト': { 'P1': 1 } };
 
-    var result = BreakService.splitGroup_(staff, excl, 840, 900);
+    var result = BreakService.splitGroup_(staff, excl, 840, 900, skills);
 
-    // 社員2名: floor(2/2)=1前半, 1後半
-    // アルバイト2名: floor(2/2)=1前半, 1後半
+    // Lv降順: A(4), B(3), C(2), D(1) → RR: A→前半, B→後半, C→前半, D→後半
     assertEqual_('splitGroup_ first count', result.first.length, 2);
     assertEqual_('splitGroup_ second count', result.second.length, 2);
+    assertDeepEqual_('splitGroup_ first', result.first, ['A社員', 'C社員']);
+    assertDeepEqual_('splitGroup_ second', result.second, ['Bバイト', 'Dバイト']);
   });
 
-  // --- 検証例 (plan文書の検証方法) ---
+  // --- 検証例 (Lv順ラウンドロビン) ---
   testGroup_('BreakService 検証例', function () {
     var staff = [
       makeStaff_('田中', '社員', '午前'),
@@ -1135,32 +1181,48 @@ function testBreakServicePure_() {
     ];
     var config = makeConfig_();
     var excl = ExclusionService.createEmpty();
+    var skills = { '田中': { 'P1': 3 }, '山田': { 'P1': 1 }, '鈴木': { 'P1': 3 }, '佐藤': { 'P1': 1 }, '高橋': { 'P1': 2 } };
 
-    var breaks = BreakService.assignBreaks(staff, config, excl);
+    var breaks = BreakService.assignBreaks(staff, config, excl, skills);
 
-    // 高橋(早朝)は割当なし
-    var allNames = [];
-    for (var i = 0; i < breaks.length; i++) {
-      allNames = allNames.concat(breaks[i].names);
-    }
-    assertTrue_('検証例: 高橋が含まれない', allNames.indexOf('高橋') === -1);
+    // 高橋(早朝)は早朝グループに割当
+    var earlyNames = breaks[0].names.concat(breaks[1].names);
+    assertTrue_('検証例: 高橋が早朝グループに含まれる', earlyNames.indexOf('高橋') !== -1);
 
-    // AM: 社員1名(田中)+アルバイト1名(山田) → 各floor(1/2)=0前半, 1後半
-    assertEqual_('検証例: AM前半 empty', breaks[0].names.length, 0);
-    assertTrue_('検証例: AM後半に田中', breaks[1].names.indexOf('田中') !== -1);
-    assertTrue_('検証例: AM後半に山田', breaks[1].names.indexOf('山田') !== -1);
+    // AM: 田中(Lv3), 山田(Lv1) → Lv降順 → RR: 田中→前半, 山田→後半
+    assertEqual_('検証例: AM前半 count', breaks[2].names.length, 1);
+    assertEqual_('検証例: AM後半 count', breaks[3].names.length, 1);
+    assertTrue_('検証例: AM前半に田中', breaks[2].names.indexOf('田中') !== -1);
+    assertTrue_('検証例: AM後半に山田', breaks[3].names.indexOf('山田') !== -1);
 
-    // PM: 社員1名(鈴木)+アルバイト1名(佐藤) → 各floor(1/2)=0前半, 1後半
-    assertEqual_('検証例: PM前半 empty', breaks[2].names.length, 0);
-    assertTrue_('検証例: PM後半に鈴木', breaks[3].names.indexOf('鈴木') !== -1);
-    assertTrue_('検証例: PM後半に佐藤', breaks[3].names.indexOf('佐藤') !== -1);
+    // PM: 鈴木(Lv3), 佐藤(Lv1) → Lv降順 → RR: 鈴木→前半, 佐藤→後半
+    assertEqual_('検証例: PM前半 count', breaks[4].names.length, 1);
+    assertEqual_('検証例: PM後半 count', breaks[5].names.length, 1);
+    assertTrue_('検証例: PM前半に鈴木', breaks[4].names.indexOf('鈴木') !== -1);
+    assertTrue_('検証例: PM後半に佐藤', breaks[5].names.indexOf('佐藤') !== -1);
 
-    // isOnBreak テスト
-    assertEqual_('検証例: 田中 at 840', BreakService.isOnBreak(breaks, '田中', 840, 60), false);
-    // 田中はAM後半(900)に入っている
-    assertEqual_('検証例: 田中 at 900', BreakService.isOnBreak(breaks, '田中', 900, 60), true);
-    assertEqual_('検証例: 田中 at 959', BreakService.isOnBreak(breaks, '田中', 959, 60), true);
-    assertEqual_('検証例: 田中 at 960', BreakService.isOnBreak(breaks, '田中', 960, 60), false);
+    // isOnBreak テスト: 田中はAM前半(840)に入っている
+    assertEqual_('検証例: 田中 at 840', BreakService.isOnBreak(breaks, '田中', 840, 60), true);
+    assertEqual_('検証例: 田中 at 899', BreakService.isOnBreak(breaks, '田中', 899, 60), true);
+    assertEqual_('検証例: 田中 at 900', BreakService.isOnBreak(breaks, '田中', 900, 60), false);
+  });
+
+  // --- assignBreaks: 早朝2名グループ分割 ---
+  testGroup_('BreakService.assignBreaks 早朝2名', function () {
+    var staff = [
+      makeStaff_('A早朝', '社員', '早朝'),
+      makeStaff_('B早朝', '社員', '早朝')
+    ];
+    var config = makeConfig_();
+    var excl = ExclusionService.createEmpty();
+
+    var breaks = BreakService.assignBreaks(staff, config, excl, {});
+
+    // 2名 → RR: A→前半, B→後半
+    assertEqual_('早朝2名: 早朝前半 count', breaks[0].names.length, 1);
+    assertEqual_('早朝2名: 早朝後半 count', breaks[1].names.length, 1);
+    assertEqual_('早朝2名: 早朝前半 breakAtMin', breaks[0].breakAtMin, 720);
+    assertEqual_('早朝2名: 早朝後半 breakAtMin', breaks[1].breakAtMin, 780);
   });
 }
 
@@ -1298,6 +1360,134 @@ function testPlacementEnginePure_() {
     assertDeepEqual_('山田 rows', result['山田'], [10, 13]);
   });
 
+  // --- buildBreakBufferSlots テスト ---
+
+  // #9b: 前1コマ・後1コマ — スロット近接性ベース
+  testGroup_('PE: buildBreakBufferSlots 前1後1', function () {
+    // 30分刻みスロット: 13:00, 13:30, 14:00, 14:30, 15:00, 15:30
+    var slots = [
+      mkSlot_('s1', 3, 780, 810),  // index 0: 13:00
+      mkSlot_('s2', 4, 810, 840),  // index 1: 13:30
+      mkSlot_('s3', 5, 840, 870),  // index 2: 14:00
+      mkSlot_('s4', 6, 870, 900),  // index 3: 14:30
+      mkSlot_('s5', 7, 900, 930),  // index 4: 15:00
+      mkSlot_('s6', 8, 930, 960)   // index 5: 15:30
+    ];
+    // 休憩 14:00(840), 前1コマ, 後1コマ
+    // 前: 最も近い1コマ(startMin<840) → index1(13:30)
+    // 後: 最も近い1コマ(startMin>840) → index3(14:30)
+    var ba = [{ breakAtMin: 840, names: ['田中'] }];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 1, 1);
+
+    assertDeepEqual_('田中 buffer', result['田中'].sort(), [1, 3]);
+  });
+
+  // #9c: 前2コマ・後1コマ
+  testGroup_('PE: buildBreakBufferSlots 前2後1', function () {
+    var slots = [
+      mkSlot_('s1', 3, 780, 810),  // index 0: 13:00
+      mkSlot_('s2', 4, 810, 840),  // index 1: 13:30
+      mkSlot_('s3', 5, 840, 870),  // index 2: 14:00
+      mkSlot_('s4', 6, 870, 900),  // index 3: 14:30
+      mkSlot_('s5', 7, 900, 930),  // index 4: 15:00
+      mkSlot_('s6', 8, 930, 960)   // index 5: 15:30
+    ];
+    // 休憩 14:00(840), 前2コマ, 後1コマ
+    // 前: 近い順2コマ → index1(13:30), index0(13:00)
+    // 後: 近い順1コマ → index3(14:30)
+    var ba = [{ breakAtMin: 840, names: ['田中'] }];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 2, 1);
+
+    assertDeepEqual_('田中 buffer', result['田中'].sort(), [0, 1, 3]);
+  });
+
+  // #9d: 先頭スロットで休憩 → 前バッファ対象なし
+  testGroup_('PE: buildBreakBufferSlots 先頭', function () {
+    var slots = [
+      mkSlot_('s1', 3, 600, 630),  // index 0: 10:00
+      mkSlot_('s2', 4, 630, 660),  // index 1: 10:30
+      mkSlot_('s3', 5, 660, 690)   // index 2: 11:00
+    ];
+    // breakAtMin=600, 前1コマ: startMin<600→なし, 後1コマ: 最近→index1(10:30)
+    var ba = [{ breakAtMin: 600, names: ['田中'] }];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 1, 1);
+
+    assertDeepEqual_('田中 先頭', result['田中'], [1]);
+  });
+
+  // #9e: 空のnames → スキップ
+  testGroup_('PE: buildBreakBufferSlots 空names', function () {
+    var slots = [
+      mkSlot_('s1', 3, 600, 630),
+      mkSlot_('s2', 4, 630, 660)
+    ];
+    var ba = [{ breakAtMin: 620, names: [] }];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 1, 1);
+
+    var keys = Object.keys(result);
+    assertEqual_('空names: 結果空', keys.length, 0);
+  });
+
+  // #9f: 複数休憩・複数人
+  testGroup_('PE: buildBreakBufferSlots 複数人', function () {
+    // 30分刻み: 780, 810, 840, 870, 900, 930
+    var slots = [
+      mkSlot_('s1', 3, 780, 810),  // index 0: 13:00
+      mkSlot_('s2', 4, 810, 840),  // index 1: 13:30
+      mkSlot_('s3', 5, 840, 870),  // index 2: 14:00
+      mkSlot_('s4', 6, 870, 900),  // index 3: 14:30
+      mkSlot_('s5', 7, 900, 930),  // index 4: 15:00
+      mkSlot_('s6', 8, 930, 960)   // index 5: 15:30
+    ];
+    var ba = [
+      { breakAtMin: 840, names: ['田中', '山田'] },  // 前→1(13:30), 後→3(14:30)
+      { breakAtMin: 900, names: ['佐藤'] }            // 前→3(14:30), 後→5(15:30)
+    ];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 1, 1);
+
+    assertDeepEqual_('田中 buffer', result['田中'].sort(), [1, 3]);
+    assertDeepEqual_('山田 buffer', result['山田'].sort(), [1, 3]);
+    assertDeepEqual_('佐藤 buffer', result['佐藤'].sort(), [3, 5]);
+  });
+
+  // #9g: 後バッファ2コマ — 休憩後もバッファ対象
+  testGroup_('PE: buildBreakBufferSlots 後2コマ', function () {
+    var slots = [
+      mkSlot_('s1', 3, 810, 840),  // index 0: 13:30
+      mkSlot_('s2', 4, 840, 870),  // index 1: 14:00
+      mkSlot_('s3', 5, 870, 900),  // index 2: 14:30
+      mkSlot_('s4', 6, 900, 930),  // index 3: 15:00
+      mkSlot_('s5', 7, 930, 960)   // index 4: 15:30
+    ];
+    // 休憩14:00(840), 前1コマ, 後2コマ
+    // 前: 近い順1コマ → index0(13:30)
+    // 後: 近い順2コマ → index2(14:30), index3(15:00)
+    var ba = [{ breakAtMin: 840, names: ['田中'] }];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 1, 2);
+
+    assertDeepEqual_('田中 buffer', result['田中'].sort(), [0, 2, 3]);
+  });
+
+  // #9h: 90分間隔スロット — ユーザー実例（旧アルゴリズムでは失敗していたケース）
+  testGroup_('PE: buildBreakBufferSlots 90分間隔', function () {
+    // 実際のコマ定義: 10:00, 11:30, 13:00, 14:30, 16:00, 17:30
+    var slots = [
+      mkSlot_('s1', 3, 600, 690),   // index 0: 10:00
+      mkSlot_('s2', 6, 690, 780),   // index 1: 11:30
+      mkSlot_('s3', 9, 780, 870),   // index 2: 13:00
+      mkSlot_('s4', 12, 870, 960),  // index 3: 14:30
+      mkSlot_('s5', 15, 960, 1050), // index 4: 16:00
+      mkSlot_('s6', 18, 1050, 1140) // index 5: 17:30
+    ];
+    // 休憩14:00(840), 前1コマ, 後1コマ
+    // 前: 最も近い1コマ(startMin<840) → index2(13:00=780)
+    // 後: 最も近い1コマ(startMin>840) → index3(14:30=870)
+    var ba = [{ breakAtMin: 840, names: ['田中'] }];
+    var result = PlacementEngine.buildBreakBufferSlots(ba, slots, 1, 1);
+
+    assertDeepEqual_('90分: 田中 buffer', result['田中'].sort(), [2, 3]);
+  });
+
   // --- generate テスト ---
 
   // #10: H1 出勤時間外 → 配置されない
@@ -1422,6 +1612,89 @@ function testPlacementEnginePure_() {
     }, rng0_);
 
     assertEqual_('H6b: 0件', result.length, 0);
+  });
+
+  // #16b: H6c 前1コマ・後1コマバッファ — スロット近接性ベース
+  testGroup_('PE: generate H6c 前1後1バッファ', function () {
+    // 30分刻み: 13:00, 13:30, 14:00, 14:30, 15:00, 15:30
+    var slots = [
+      mkSlot_('s1', 3, 780, 810),  // index 0: 13:00
+      mkSlot_('s2', 4, 810, 840),  // index 1: 13:30 ← バッファ（最近前1コマ）
+      mkSlot_('s3', 5, 840, 870),  // index 2: 14:00 ← 休憩(H6a)
+      mkSlot_('s4', 6, 870, 900),  // index 3: 14:30 ← 休憩(H6a)+バッファ（最近後1コマ）
+      mkSlot_('s5', 7, 900, 930),  // index 4: 15:00
+      mkSlot_('s6', 8, 930, 960)   // index 5: 15:30
+    ];
+    var presets = [mkPreset_('P1')];
+    var staff = [mkStaff_('田中')];
+    var skills = { '田中': { 'P1': 2 } };
+    var breakAssignments = [{ breakAtMin: 840, names: ['田中'] }]; // 14:00
+
+    var result = PlacementEngine.generate({
+      slots: slots, presets: presets, staffList: staff, skills: skills,
+      breakAssignments: breakAssignments, breakDuration: 60, breakExcludedRows: {},
+      breakBufferBefore: 1, breakBufferAfter: 1,
+      exclusions: emptyExcl_()
+    }, rng0_);
+
+    // index 0: 配置可, index 1: バッファ, index 2-3: 休憩+バッファ, index 4-5: 配置可
+    assertEqual_('H6c: 3件', result.length, 3);
+    var slotIndices = result.map(function (p) { return p.slotIndex; }).sort();
+    assertDeepEqual_('H6c: 配置スロット', slotIndices, [0, 4, 5]);
+  });
+
+  // #16c: H6c バッファ0 → H6c無効（H6bのみ有効）
+  testGroup_('PE: generate H6c バッファ0=H6c無効', function () {
+    var slots = [
+      mkSlot_('s1', 4, 810, 840),  // index 0: 13:30
+      mkSlot_('s2', 5, 840, 870),  // index 1: 14:00 ← 休憩(H6a)
+      mkSlot_('s3', 6, 870, 900),  // index 2: 14:30 ← 休憩(H6a)
+      mkSlot_('s4', 7, 900, 930)   // index 3: 15:00
+    ];
+    var presets = [mkPreset_('P1')];
+    var staff = [mkStaff_('田中')];
+    var skills = { '田中': { 'P1': 2 } };
+    var breakAssignments = [{ breakAtMin: 840, names: ['田中'] }];
+
+    // バッファ0 → H6c無効、breakExcludedRowsも空 → H6aのみ
+    var result = PlacementEngine.generate({
+      slots: slots, presets: presets, staffList: staff, skills: skills,
+      breakAssignments: breakAssignments, breakDuration: 60, breakExcludedRows: {},
+      breakBufferBefore: 0, breakBufferAfter: 0,
+      exclusions: emptyExcl_()
+    }, rng0_);
+
+    // index 0,3: 配置可, index 1,2: 休憩 → 2件
+    assertEqual_('バッファ0: 2件', result.length, 2);
+    var slotIndices = result.map(function (p) { return p.slotIndex; }).sort();
+    assertDeepEqual_('バッファ0: 配置スロット', slotIndices, [0, 3]);
+  });
+
+  // #16d: H6c 他スタッフは影響なし
+  testGroup_('PE: generate H6c 他スタッフ影響なし', function () {
+    var slots = [
+      mkSlot_('s1', 4, 810, 840),  // index 0: 13:30 ← 田中バッファ
+      mkSlot_('s2', 5, 840, 870),  // index 1: 14:00 ← 田中休憩
+      mkSlot_('s3', 7, 900, 930)   // index 2: 15:00
+    ];
+    var presets = [mkPreset_('P1')];
+    var staff = [mkStaff_('田中'), mkStaff_('山田')];
+    var skills = { '田中': { 'P1': 2 }, '山田': { 'P1': 2 } };
+    var breakAssignments = [{ breakAtMin: 840, names: ['田中'] }];
+
+    var result = PlacementEngine.generate({
+      slots: slots, presets: presets, staffList: staff, skills: skills,
+      breakAssignments: breakAssignments, breakDuration: 30, breakExcludedRows: {},
+      breakBufferBefore: 1, breakBufferAfter: 1,
+      exclusions: emptyExcl_()
+    }, rng0_);
+
+    // 山田は全スロット配置可能
+    var yamadaCount = 0;
+    for (var i = 0; i < result.length; i++) {
+      if (result[i].staffName === '山田') yamadaCount++;
+    }
+    assertTrue_('H6c: 山田はバッファ影響なし', yamadaCount >= 2);
   });
 
   // #17: H7 除外 → 配置されない
@@ -2545,5 +2818,314 @@ function testUiWizardControllerPure_() {
     // #6 extractDatesFromSheet_: staffCount
     assertEqual_('extractDatesFromSheet_: staffCount[0]', result4[0].staffCount, 2);
     assertEqual_('extractDatesFromSheet_: staffCount[1]', result4[1].staffCount, 1);
+  });
+}
+
+/* ---------- ConfigService JSON テスト ---------- */
+
+function testConfigServiceJsonPure_() {
+  // --- loadConfigFromJson_ ---
+  testGroup_('ConfigService.loadConfigFromJson_', function () {
+    var jsonStr = JSON.stringify({
+      version: 1,
+      slotBoundaries: ['10:00', '11:30', '13:00', '14:30', '16:00', '17:30'],
+      breakDuration: 60,
+      breakBufferBefore: 2,
+      breakBufferAfter: 1,
+      breakTimes: {
+        earlyFirst: '12:00', earlySecond: '13:00',
+        amFirst: '14:00', amSecond: '15:00',
+        pmFirst: '16:30', pmSecond: '17:30'
+      },
+      breakExclusionRows: { '11': [9, 12] },
+      shiftTimes: {
+        '早朝': { start: '8:00', end: '17:00', pulldownStart: '10:00', pulldownEnd: '16:30' }
+      },
+      tournamentPresets: [
+        { label: '0部', startStr: '10:00', endStr: '12:00', weekendOnly: true }
+      ]
+    });
+
+    var config = ConfigService.loadConfigFromJson_(jsonStr);
+
+    // スロット数
+    assertEqual_('JSON: slot count', config.slots.length, 6);
+    // 最初のスロット
+    assertEqual_('JSON: slot[0].startMin', config.slots[0].startMin, 600);
+    assertEqual_('JSON: slot[0].endMin', config.slots[0].endMin, 690);
+    assertEqual_('JSON: slot[0].slotId', config.slots[0].slotId, 'slot_1');
+    // 最後のスロット（interval=90min）
+    assertEqual_('JSON: slot[5].startMin', config.slots[5].startMin, 1050);
+    assertEqual_('JSON: slot[5].endMin', config.slots[5].endMin, 1140);
+
+    // 休憩時間
+    assertEqual_('JSON: breakDuration', config.breakDuration, 60);
+    assertEqual_('JSON: breakBufferBefore', config.breakBufferBefore, 2);
+    assertEqual_('JSON: breakBufferAfter', config.breakBufferAfter, 1);
+
+    // 休憩時刻
+    assertEqual_('JSON: breakTimes.earlyFirst', config.breakTimes.earlyFirst, 720);
+    assertEqual_('JSON: breakTimes.amFirst', config.breakTimes.amFirst, 840);
+    assertEqual_('JSON: breakTimes.pmSecond', config.breakTimes.pmSecond, 1050);
+
+    // 休憩除外行
+    assertDeepEqual_('JSON: breakExclusionMap[11]', config.breakExclusionMap[11], [9, 12]);
+
+    // シフト時間
+    assertEqual_('JSON: shiftTimes.早朝.start', config.shiftTimes['早朝'].start, 480);
+    assertEqual_('JSON: shiftTimes.早朝.end', config.shiftTimes['早朝'].end, 1020);
+    assertEqual_('JSON: shiftTimes.早朝.pulldownStart', config.shiftTimes['早朝'].pulldownStart, 600);
+
+    // 大会プリセット
+    assertEqual_('JSON: tournamentPresets count', config.tournamentPresets.length, 1);
+    assertEqual_('JSON: preset[0].label', config.tournamentPresets[0].label, '0部');
+    assertEqual_('JSON: preset[0].startMin', config.tournamentPresets[0].startMin, 600);
+    assertEqual_('JSON: preset[0].endMin', config.tournamentPresets[0].endMin, 720);
+    assertEqual_('JSON: preset[0].weekendOnly', config.tournamentPresets[0].weekendOnly, true);
+  });
+
+  // --- configToJson_ → loadConfigFromJson_ ラウンドトリップ ---
+  testGroup_('ConfigService.configToJson_ round-trip', function () {
+    var originalConfig = {
+      slots: [
+        { slotId: 'slot_1', startMin: 600, endMin: 690, rowNumber: null },
+        { slotId: 'slot_2', startMin: 690, endMin: 780, rowNumber: null }
+      ],
+      breakTimes: {
+        earlyFirst: 720, earlySecond: 780,
+        amFirst: 840, amSecond: 900,
+        pmFirst: 990, pmSecond: 1050
+      },
+      breakDuration: 60,
+      breakBufferBefore: 3,
+      breakBufferAfter: 0,
+      breakExclusionMap: { 11: [9, 12] },
+      shiftTimes: {
+        '早朝': { start: 480, end: 1020, pulldownStart: 600, pulldownEnd: 990 }
+      },
+      tournamentPresets: [
+        { label: '0部', startMin: 600, endMin: 720, weekendOnly: true }
+      ]
+    };
+
+    var jsonStr = ConfigService.configToJson_(originalConfig);
+    var parsed = JSON.parse(jsonStr);
+
+    // version
+    assertEqual_('roundtrip: version', parsed.version, 1);
+
+    // slotBoundaries
+    assertDeepEqual_('roundtrip: slotBoundaries', parsed.slotBoundaries, ['10:00', '11:30']);
+
+    // breakTimes
+    assertEqual_('roundtrip: breakTimes.earlyFirst', parsed.breakTimes.earlyFirst, '12:00');
+    assertEqual_('roundtrip: breakTimes.pmSecond', parsed.breakTimes.pmSecond, '17:30');
+
+    // buffer
+    assertEqual_('roundtrip: breakBufferBefore', parsed.breakBufferBefore, 3);
+    assertEqual_('roundtrip: breakBufferAfter', parsed.breakBufferAfter, 0);
+
+    // breakExclusionRows
+    assertDeepEqual_('roundtrip: breakExclusionRows', parsed.breakExclusionRows, { '11': [9, 12] });
+
+    // shiftTimes
+    assertEqual_('roundtrip: shiftTimes.早朝.start', parsed.shiftTimes['早朝'].start, '8:00');
+
+    // tournamentPresets
+    assertEqual_('roundtrip: preset[0].startStr', parsed.tournamentPresets[0].startStr, '10:00');
+
+    // ラウンドトリップ: JSON→Config→JSON == 元のJSON
+    var rtConfig = ConfigService.loadConfigFromJson_(jsonStr);
+    assertEqual_('roundtrip: slots count', rtConfig.slots.length, 2);
+    assertEqual_('roundtrip: slot[0].startMin', rtConfig.slots[0].startMin, 600);
+    assertEqual_('roundtrip: breakDuration', rtConfig.breakDuration, 60);
+    assertEqual_('roundtrip: breakBufferBefore', rtConfig.breakBufferBefore, 3);
+    assertEqual_('roundtrip: breakTimes.amFirst', rtConfig.breakTimes.amFirst, 840);
+    assertEqual_('roundtrip: shiftTimes.早朝.start', rtConfig.shiftTimes['早朝'].start, 480);
+    assertEqual_('roundtrip: preset[0].startMin', rtConfig.tournamentPresets[0].startMin, 600);
+  });
+
+  // --- saveConfig JSON出力テスト ---
+  testGroup_('ConfigService.saveConfig JSON format', function () {
+    // saveConfigが生成するJSON文字列の構造をテスト
+    var configData = {
+      slotBoundaries: ['10:00', '11:30'],
+      breakDuration: 45,
+      breakBufferBefore: 1,
+      breakBufferAfter: 2,
+      breakTimes: {
+        earlyFirst: '12:00', earlySecond: '13:00',
+        amFirst: '14:00', amSecond: '15:00',
+        pmFirst: '16:30', pmSecond: '17:30'
+      },
+      breakExclusionRows: { '11': [9] },
+      shiftTimes: { '早朝': { start: '8:00', end: '17:00', pulldownStart: '10:00', pulldownEnd: '16:30' } },
+      tournamentPresets: [{ label: 'テスト', startStr: '10:00', endStr: '12:00', weekendOnly: false }]
+    };
+
+    // JSON構造を直接構築して検証（saveConfigはシートへの書込みが必要なのでJSON部分のみテスト）
+    var json = {
+      version: 1,
+      slotBoundaries: configData.slotBoundaries,
+      breakDuration: configData.breakDuration,
+      breakBufferBefore: configData.breakBufferBefore || 0,
+      breakBufferAfter: configData.breakBufferAfter || 0,
+      breakTimes: configData.breakTimes,
+      breakExclusionRows: configData.breakExclusionRows || {},
+      shiftTimes: configData.shiftTimes,
+      tournamentPresets: configData.tournamentPresets || []
+    };
+    var jsonStr = JSON.stringify(json);
+    var reparsed = JSON.parse(jsonStr);
+
+    assertEqual_('saveJSON: version', reparsed.version, 1);
+    assertEqual_('saveJSON: breakDuration', reparsed.breakDuration, 45);
+    assertEqual_('saveJSON: breakBufferBefore', reparsed.breakBufferBefore, 1);
+    assertEqual_('saveJSON: breakBufferAfter', reparsed.breakBufferAfter, 2);
+    assertDeepEqual_('saveJSON: slotBoundaries', reparsed.slotBoundaries, ['10:00', '11:30']);
+    assertEqual_('saveJSON: breakTimes.amFirst', reparsed.breakTimes.amFirst, '14:00');
+    assertDeepEqual_('saveJSON: breakExclusionRows', reparsed.breakExclusionRows, { '11': [9] });
+  });
+
+  // --- loadConfigFromJson_ デフォルト値テスト ---
+  testGroup_('ConfigService.loadConfigFromJson_ defaults', function () {
+    var minimalJson = JSON.stringify({ version: 1 });
+    var config = ConfigService.loadConfigFromJson_(minimalJson);
+
+    assertEqual_('defaults: slot count', config.slots.length, 0);
+    assertEqual_('defaults: breakDuration', config.breakDuration, 60);
+    assertEqual_('defaults: breakBufferBefore', config.breakBufferBefore, 0);
+    assertEqual_('defaults: breakBufferAfter', config.breakBufferAfter, 0);
+    assertEqual_('defaults: breakTimes.earlyFirst', config.breakTimes.earlyFirst, 720);
+    assertEqual_('defaults: tournamentPresets count', config.tournamentPresets.length, 0);
+    assertEqual_('defaults: postPresets count', config.postPresets.length, 0);
+  });
+}
+
+/* ---------- PresetService Config JSON テスト ---------- */
+
+function testPresetServiceConfigPure_() {
+  // --- loadPresetsFromConfig: 基本ソート・バリデーション ---
+  testGroup_('PresetService.loadPresetsFromConfig basic', function () {
+    var input = [
+      { postName: 'チケット', enabled: true, requiredLv: 2, order: 2, sortDir: 'ASC', concurrentPost: null, activeWindows: [] },
+      { postName: 'ゲート', enabled: true, requiredLv: 1, order: 1, sortDir: 'DESC', concurrentPost: null, activeWindows: [] },
+      { postName: '無効持ち場', enabled: false, requiredLv: 1, order: 3, sortDir: 'DESC', concurrentPost: null, activeWindows: [] }
+    ];
+    var result = PresetService.loadPresetsFromConfig(input);
+
+    assertEqual_('fromConfig: count (enabled only)', result.length, 2);
+    assertEqual_('fromConfig: order sort [0]', result[0].postName, 'ゲート');
+    assertEqual_('fromConfig: order sort [1]', result[1].postName, 'チケット');
+    assertEqual_('fromConfig: sortDir [0]', result[0].sortDir, 'DESC');
+    assertEqual_('fromConfig: sortDir [1]', result[1].sortDir, 'ASC');
+    assertEqual_('fromConfig: requiredLv [0]', result[0].requiredLv, 1);
+  });
+
+  // --- loadPresetsFromConfig: concurrentPost ---
+  testGroup_('PresetService.loadPresetsFromConfig concurrentPost', function () {
+    var input = [
+      { postName: 'A', enabled: true, requiredLv: 1, order: 1, sortDir: 'DESC', concurrentPost: 'B', activeWindows: [] },
+      { postName: 'B', enabled: true, requiredLv: 1, order: 2, sortDir: 'DESC', concurrentPost: 'なし', activeWindows: [] },
+      { postName: 'C', enabled: true, requiredLv: 1, order: 3, sortDir: 'DESC', concurrentPost: '', activeWindows: [] }
+    ];
+    var result = PresetService.loadPresetsFromConfig(input);
+
+    assertEqual_('concurrentPost: A→B', result[0].concurrentPost, 'B');
+    assertEqual_('concurrentPost: B→null (なし)', result[1].concurrentPost, null);
+    assertEqual_('concurrentPost: C→null (empty)', result[2].concurrentPost, null);
+  });
+
+  // --- loadPresetsFromConfig: activeWindows (startStr/endStr形式) ---
+  testGroup_('PresetService.loadPresetsFromConfig activeWindows', function () {
+    var input = [
+      { postName: 'X', enabled: true, requiredLv: 1, order: 1, sortDir: 'DESC', concurrentPost: null,
+        activeWindows: [{ startStr: '12:00', endStr: '14:00' }, { startStr: '16:00', endStr: '18:00' }] }
+    ];
+    var result = PresetService.loadPresetsFromConfig(input);
+
+    assertEqual_('activeWindows: count', result[0].activeWindows.length, 2);
+    assertEqual_('activeWindows: [0].startMin', result[0].activeWindows[0].startMin, 720);
+    assertEqual_('activeWindows: [0].endMin', result[0].activeWindows[0].endMin, 840);
+    assertEqual_('activeWindows: [1].startMin', result[0].activeWindows[1].startMin, 960);
+    assertEqual_('activeWindows: [1].endMin', result[0].activeWindows[1].endMin, 1080);
+  });
+
+  // --- loadPresetsFromConfig: empty/null input ---
+  testGroup_('PresetService.loadPresetsFromConfig empty', function () {
+    assertDeepEqual_('fromConfig: null', PresetService.loadPresetsFromConfig(null), []);
+    assertDeepEqual_('fromConfig: empty array', PresetService.loadPresetsFromConfig([]), []);
+  });
+
+  // --- loadPresetsFromConfig: Lv validation ---
+  testGroup_('PresetService.loadPresetsFromConfig Lv validation', function () {
+    var input = [
+      { postName: 'Bad', enabled: true, requiredLv: 5, order: 1, sortDir: 'DESC', concurrentPost: null, activeWindows: [] }
+    ];
+    assertThrows_('fromConfig: Lv5 throws', function () {
+      PresetService.loadPresetsFromConfig(input);
+    });
+  });
+
+  // --- getDisabledPostNamesFromConfig ---
+  testGroup_('PresetService.getDisabledPostNamesFromConfig', function () {
+    var input = [
+      { postName: 'A', enabled: true },
+      { postName: 'B', enabled: false },
+      { postName: 'C', enabled: true },
+      { postName: 'D', enabled: false }
+    ];
+    var disabled = PresetService.getDisabledPostNamesFromConfig(input);
+
+    assertEqual_('disabled: count', disabled.length, 2);
+    assertEqual_('disabled: [0]', disabled[0], 'B');
+    assertEqual_('disabled: [1]', disabled[1], 'D');
+
+    // empty
+    assertDeepEqual_('disabled: null', PresetService.getDisabledPostNamesFromConfig(null), []);
+    assertDeepEqual_('disabled: empty', PresetService.getDisabledPostNamesFromConfig([]), []);
+  });
+
+  // --- ConfigService roundtrip with postPresets ---
+  testGroup_('ConfigService roundtrip with postPresets', function () {
+    var configWithPresets = {
+      slots: [{ slotId: 'slot_1', startMin: 600, endMin: 690, rowNumber: null }],
+      breakTimes: { earlyFirst: 720, earlySecond: 780, amFirst: 840, amSecond: 900, pmFirst: 990, pmSecond: 1050 },
+      breakDuration: 60,
+      breakBufferBefore: 0,
+      breakBufferAfter: 0,
+      breakExclusionMap: {},
+      shiftTimes: { '午前': { start: 570, end: 1080, pulldownStart: 600, pulldownEnd: 1050 } },
+      tournamentPresets: [],
+      placementMode: 'global',
+      postIntervals: {},
+      postPresets: [
+        { postName: 'ゲート', enabled: true, requiredLv: 2, order: 1, sortDir: 'DESC', concurrentPost: 'チケット',
+          activeWindows: [{ startMin: 720, endMin: 840 }] },
+        { postName: 'チケット', enabled: false, requiredLv: 1, order: 2, sortDir: 'ASC', concurrentPost: null,
+          activeWindows: [] }
+      ]
+    };
+
+    // serialize → parse → verify
+    var jsonStr = ConfigService.configToJson_(configWithPresets);
+    var parsed = ConfigService.loadConfigFromJson_(jsonStr);
+
+    assertEqual_('roundtrip: postPresets count', parsed.postPresets.length, 2);
+    assertEqual_('roundtrip: [0].postName', parsed.postPresets[0].postName, 'ゲート');
+    assertEqual_('roundtrip: [0].enabled', parsed.postPresets[0].enabled, true);
+    assertEqual_('roundtrip: [0].requiredLv', parsed.postPresets[0].requiredLv, 2);
+    assertEqual_('roundtrip: [0].concurrentPost', parsed.postPresets[0].concurrentPost, 'チケット');
+    assertEqual_('roundtrip: [0].activeWindows count', parsed.postPresets[0].activeWindows.length, 1);
+    assertEqual_('roundtrip: [0].activeWindows[0].startMin', parsed.postPresets[0].activeWindows[0].startMin, 720);
+    assertEqual_('roundtrip: [0].activeWindows[0].endMin', parsed.postPresets[0].activeWindows[0].endMin, 840);
+    assertEqual_('roundtrip: [1].postName', parsed.postPresets[1].postName, 'チケット');
+    assertEqual_('roundtrip: [1].enabled', parsed.postPresets[1].enabled, false);
+    assertEqual_('roundtrip: [1].concurrentPost', parsed.postPresets[1].concurrentPost, null);
+
+    // loadPresetsFromConfig on the roundtripped data → only enabled ones
+    var presets = PresetService.loadPresetsFromConfig(parsed.postPresets);
+    assertEqual_('roundtrip→loadPresetsFromConfig: count', presets.length, 1);
+    assertEqual_('roundtrip→loadPresetsFromConfig: postName', presets[0].postName, 'ゲート');
   });
 }

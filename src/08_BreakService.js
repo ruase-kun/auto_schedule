@@ -4,8 +4,8 @@
  * 休憩の前半/後半グループ分割と割当を行う。
  * シートI/Oなし、純粋ロジックのみ。ステートレス設計。
  *
- * 対象シフト: 午前・午後のみ（早朝・時差は休憩割当なし）
- * 社員系判定: employment !== 'アルバイト' かつ空でない
+ * 対象シフト: 早朝・午前・午後（時差は休憩割当なし）
+ * 割当方式: 全持ち場最大Lv降順→名前昇順でソートし、ラウンドロビン
  * 時間区間: 半開区間 [breakAtMin, breakAtMin + breakDuration)
  */
 
@@ -16,24 +16,30 @@ var BreakService = (function () {
    * @param {Staff[]} staffList - 出勤スタッフ一覧
    * @param {Config} config - コンフィグ（breakTimes, breakDuration）
    * @param {Exclusions} exclusions - 除外情報
-   * @returns {BreakAssignment[]} 4件の休憩割当（AM前半, AM後半, PM前半, PM後半）
+   * @param {Object<string, Object<string, number>>} [skills] - スキルマップ（Lv順ソート用）
+   * @returns {BreakAssignment[]} 6件の休憩割当（早朝前半, 早朝後半, AM前半, AM後半, PM前半, PM後半）
    */
-  function assignBreaks(staffList, config, exclusions) {
+  function assignBreaks(staffList, config, exclusions, skills) {
     var bt = config.breakTimes;
+    var sk = skills || {};
 
-    // 午前・午後対象をフィルタ
+    // 早朝・午前・午後対象をフィルタ
+    var earlyStaff = filterEligible_(staffList, '早朝', exclusions);
     var amStaff = filterEligible_(staffList, '午前', exclusions);
     var pmStaff = filterEligible_(staffList, '午後', exclusions);
 
-    // 前半/後半に分割
-    var amSplit = splitGroup_(amStaff, exclusions, bt.amFirst, bt.amSecond);
-    var pmSplit = splitGroup_(pmStaff, exclusions, bt.pmFirst, bt.pmSecond);
+    // 前半/後半に分割（Lv順ラウンドロビン）
+    var earlySplit = splitGroup_(earlyStaff, exclusions, bt.earlyFirst, bt.earlySecond, sk);
+    var amSplit = splitGroup_(amStaff, exclusions, bt.amFirst, bt.amSecond, sk);
+    var pmSplit = splitGroup_(pmStaff, exclusions, bt.pmFirst, bt.pmSecond, sk);
 
     return [
-      { breakAtMin: bt.amFirst,  names: amSplit.first },
-      { breakAtMin: bt.amSecond, names: amSplit.second },
-      { breakAtMin: bt.pmFirst,  names: pmSplit.first },
-      { breakAtMin: bt.pmSecond, names: pmSplit.second }
+      { breakAtMin: bt.earlyFirst,  names: earlySplit.first },
+      { breakAtMin: bt.earlySecond, names: earlySplit.second },
+      { breakAtMin: bt.amFirst,     names: amSplit.first },
+      { breakAtMin: bt.amSecond,    names: amSplit.second },
+      { breakAtMin: bt.pmFirst,     names: pmSplit.first },
+      { breakAtMin: bt.pmSecond,    names: pmSplit.second }
     ];
   }
 
@@ -68,22 +74,39 @@ var BreakService = (function () {
   }
 
   /**
+   * スタッフの全持ち場中の最大スキルレベルを取得（内部）
+   * @param {string} name - スタッフ名
+   * @param {Object<string, Object<string, number>>} skills - スキルマップ
+   * @returns {number}
+   */
+  function getMaxLv_(name, skills) {
+    var staffSkills = skills[name] || {};
+    var maxLv = 0;
+    var posts = Object.keys(staffSkills);
+    for (var i = 0; i < posts.length; i++) {
+      if (staffSkills[posts[i]] > maxLv) maxLv = staffSkills[posts[i]];
+    }
+    return maxLv;
+  }
+
+  /**
    * 前半/後半グループ分割（内部）
    *
    * 1. 各休憩時刻で大会中でないかチェック
    * 2. 両方可能 / first限定 / second限定 に分類
-   * 3. 両方可能グループを社員系/アルバイト系に分離
-   * 4. 各系を名前順ソートし、floor(count/2)を前半、残りを後半
-   * 5. first限定 + 社員前半 + アルバイト前半 → first
-   * 6. second限定 + 社員後半 + アルバイト後半 → second
+   * 3. 両方可能グループを全持ち場最大Lv降順→名前昇順でソート
+   * 4. ラウンドロビン: 偶数index→前半, 奇数index→後半
+   * 5. first限定 + ラウンドロビン前半 → first
+   * 6. second限定 + ラウンドロビン後半 → second
    *
    * @param {Staff[]} staff - フィルタ済みスタッフ
    * @param {Exclusions} exclusions - 除外情報
    * @param {number} firstMin - 前半休憩時刻（分）
    * @param {number} secondMin - 後半休憩時刻（分）
+   * @param {Object<string, Object<string, number>>} skills - スキルマップ
    * @returns {{first: string[], second: string[]}}
    */
-  function splitGroup_(staff, exclusions, firstMin, secondMin) {
+  function splitGroup_(staff, exclusions, firstMin, secondMin, skills) {
     var firstOnly = [];   // first時間帯のみ可能
     var secondOnly = [];  // second時間帯のみ可能
     var both = [];        // 両方可能
@@ -103,48 +126,42 @@ var BreakService = (function () {
       // どちらも不可の場合は割当なし
     }
 
-    // 両方可能グループを社員系/アルバイト系に分離
-    var socialBoth = [];
-    var partBoth = [];
+    // 両方可能グループ: 最大Lv降順→名前昇順でソート
+    both.sort(function (a, b) {
+      var lvA = getMaxLv_(a.name, skills);
+      var lvB = getMaxLv_(b.name, skills);
+      if (lvB !== lvA) return lvB - lvA; // Lv降順
+      return a.name < b.name ? -1 : (a.name > b.name ? 1 : 0); // 名前昇順
+    });
+
+    // ラウンドロビン: 偶数index→前半, 奇数index→後半
+    var bothFirst = [];
+    var bothSecond = [];
     for (var j = 0; j < both.length; j++) {
-      if (isSocial_(both[j].employment)) {
-        socialBoth.push(both[j].name);
+      if (j % 2 === 0) {
+        bothFirst.push(both[j].name);
       } else {
-        partBoth.push(both[j].name);
+        bothSecond.push(both[j].name);
       }
     }
 
-    // 名前順ソート（安定分配）
-    socialBoth.sort();
-    partBoth.sort();
-
-    // 社員系: floor(count/2) → 前半, 残り → 後半
-    var socialHalf = Math.floor(socialBoth.length / 2);
-    var socialFirst = socialBoth.slice(0, socialHalf);
-    var socialSecond = socialBoth.slice(socialHalf);
-
-    // アルバイト系: floor(count/2) → 前半, 残り → 後半
-    var partHalf = Math.floor(partBoth.length / 2);
-    var partFirst = partBoth.slice(0, partHalf);
-    var partSecond = partBoth.slice(partHalf);
-
-    // first限定も名前順ソート
+    // first限定/second限定も名前順ソート
     firstOnly.sort();
     secondOnly.sort();
 
     // 合成
-    var first = firstOnly.concat(socialFirst).concat(partFirst);
-    var second = secondOnly.concat(socialSecond).concat(partSecond);
+    var first = firstOnly.concat(bothFirst);
+    var second = secondOnly.concat(bothSecond);
 
     return { first: first, second: second };
   }
 
   /**
    * シフト種別＋終日除外でフィルタ（内部）
-   * 午前・午後シフトのみ対象。早朝・時差は除外。
+   * 早朝・午前・午後シフトが対象。時差は除外。
    * 終日除外(allDay)のスタッフも除外。
    * @param {Staff[]} staffList - 全スタッフ
-   * @param {string} shiftType - 対象シフト種別（"午前"|"午後"）
+   * @param {string} shiftType - 対象シフト種別（"早朝"|"午前"|"午後"）
    * @param {Exclusions} exclusions - 除外情報
    * @returns {Staff[]}
    */
@@ -162,6 +179,7 @@ var BreakService = (function () {
   return {
     assignBreaks: assignBreaks,
     isOnBreak: isOnBreak,
+    getMaxLv_: getMaxLv_,
     isSocial_: isSocial_,
     splitGroup_: splitGroup_,
     filterEligible_: filterEligible_

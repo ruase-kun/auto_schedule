@@ -1,32 +1,11 @@
 /**
- * 03_ConfigService.js — コンフィグ読込
+ * 03_ConfigService.js — コンフィグ読込（JSON/旧形式自動検出）
  *
- * 06_コンフィグ シートからセクションベースで設定を読込む。
+ * 06_コンフィグ シートのセルA1にJSON文字列を格納。
+ * JSONの形式はUI用フォーマット（時刻は"H:MM"文字列）。
  *
- * シートレイアウト:
- *   A列にセクションヘッダ（[コマ定義] 等）→ データ行 → 空行で区切り
- *
- *   [コマ定義]
- *   slotId | 行番号 | 開始時刻 | 終了時刻
- *   slot_1 | 3      | 10:00    | 11:30
- *   ...
- *
- *   [休憩設定]
- *   休憩時間(分) | 60
- *   AM前半       | 14:00
- *   AM後半       | 15:00
- *   PM前半       | 16:30
- *   PM後半       | 17:30
- *
- *   [休憩除外行]
- *   休憩行 | 除外行1 | 除外行2 | ...
- *   11     | 9       | 12
- *   ...
- *
- *   [シフト時間]
- *   シフト名 | 勤務開始 | 勤務終了 | PD開始 | PD終了
- *   早朝     | 8:00     | 17:00    | 10:00  | 16:30
- *   ...
+ * 旧形式（セクションベース）も自動検出し後方互換を維持。
+ * 旧形式シートは次回保存時にJSONへ自動マイグレーションされる。
  */
 
 // eslint-disable-next-line no-unused-vars
@@ -34,13 +13,145 @@ var ConfigService = (function () {
   'use strict';
 
   /**
-   * コンフィグシートから全設定を読込む
+   * コンフィグシートから全設定を読込む（JSON/旧形式自動検出）
    * @param {string} configSheetName - コンフィグシート名
    * @returns {Config}
    */
   function loadConfig(configSheetName) {
     var data = SheetGateway.getValues(configSheetName);
 
+    // JSON形式検出: A1が{で始まるか
+    var a1 = String(data[0][0]).trim();
+    if (a1.charAt(0) === '{') {
+      return loadConfigFromJson_(a1);
+    }
+
+    // 旧形式（セクションベース）パース
+    return loadConfigLegacy_(data);
+  }
+
+  /**
+   * JSON文字列から内部Configを構築する
+   * @param {string} jsonStr - JSON文字列（UI用H:MM形式）
+   * @returns {Config}
+   */
+  function loadConfigFromJson_(jsonStr) {
+    var json = JSON.parse(jsonStr);
+
+    // slotBoundaries → TimeSlot[]
+    var boundaries = json.slotBoundaries || [];
+    var times = [];
+    for (var i = 0; i < boundaries.length; i++) {
+      times.push(TimeUtils.parseTimeToMin(boundaries[i]));
+    }
+    var interval = (times.length >= 2) ? (times[1] - times[0]) : 90;
+    var slots = [];
+    for (var j = 0; j < times.length; j++) {
+      var endMin = (j + 1 < times.length) ? times[j + 1] : times[j] + interval;
+      slots.push({
+        slotId: 'slot_' + (j + 1),
+        startMin: times[j],
+        endMin: endMin,
+        rowNumber: null
+      });
+    }
+
+    // breakTimes → 分変換
+    var bt = json.breakTimes || {};
+    var breakTimes = {
+      earlyFirst: TimeUtils.parseTimeToMin(bt.earlyFirst || '12:00'),
+      earlySecond: TimeUtils.parseTimeToMin(bt.earlySecond || '13:00'),
+      amFirst: TimeUtils.parseTimeToMin(bt.amFirst || '14:00'),
+      amSecond: TimeUtils.parseTimeToMin(bt.amSecond || '15:00'),
+      pmFirst: TimeUtils.parseTimeToMin(bt.pmFirst || '16:30'),
+      pmSecond: TimeUtils.parseTimeToMin(bt.pmSecond || '17:30')
+    };
+
+    // shiftTimes → 分変換
+    var shiftTimes = {};
+    var stJson = json.shiftTimes || {};
+    var shiftNames = Object.keys(stJson);
+    for (var s = 0; s < shiftNames.length; s++) {
+      var st = stJson[shiftNames[s]];
+      shiftTimes[shiftNames[s]] = {
+        start: TimeUtils.parseTimeToMin(st.start),
+        end: TimeUtils.parseTimeToMin(st.end),
+        pulldownStart: TimeUtils.parseTimeToMin(st.pulldownStart),
+        pulldownEnd: TimeUtils.parseTimeToMin(st.pulldownEnd)
+      };
+    }
+
+    // breakExclusionRows → breakExclusionMap（キー: 文字列→数値）
+    var breakExclusionMap = {};
+    var exclJson = json.breakExclusionRows || {};
+    var exclKeys = Object.keys(exclJson);
+    for (var e = 0; e < exclKeys.length; e++) {
+      breakExclusionMap[parseInt(exclKeys[e], 10)] = exclJson[exclKeys[e]];
+    }
+
+    // tournamentPresets → 分変換
+    var tournamentPresets = [];
+    var tpJson = json.tournamentPresets || [];
+    for (var p = 0; p < tpJson.length; p++) {
+      var tp = tpJson[p];
+      tournamentPresets.push({
+        label: tp.label,
+        startMin: TimeUtils.parseTimeToMin(tp.startStr),
+        endMin: TimeUtils.parseTimeToMin(tp.endStr),
+        weekendOnly: !!tp.weekendOnly
+      });
+    }
+
+    // postPresets → activeWindowsのstartStr/endStr→startMin/endMin変換
+    var postPresets = [];
+    var ppJson = json.postPresets || [];
+    for (var pp = 0; pp < ppJson.length; pp++) {
+      var preset = ppJson[pp];
+      var windows = [];
+      var rawWin = preset.activeWindows || [];
+      for (var w = 0; w < rawWin.length; w++) {
+        var win = rawWin[w];
+        if (win.startStr && win.endStr) {
+          windows.push({
+            startMin: TimeUtils.parseTimeToMin(win.startStr),
+            endMin: TimeUtils.parseTimeToMin(win.endStr)
+          });
+        } else if (win.startMin !== undefined) {
+          windows.push({ startMin: win.startMin, endMin: win.endMin });
+        }
+      }
+      postPresets.push({
+        postName: preset.postName,
+        enabled: !!preset.enabled,
+        requiredLv: parseInt(preset.requiredLv, 10) || 1,
+        order: parseInt(preset.order, 10) || 1,
+        sortDir: preset.sortDir || 'DESC',
+        concurrentPost: preset.concurrentPost || null,
+        activeWindows: windows
+      });
+    }
+
+    return {
+      slots: slots,
+      breakTimes: breakTimes,
+      breakDuration: parseInt(json.breakDuration, 10) || 60,
+      breakBufferBefore: parseInt(json.breakBufferBefore, 10) || 0,
+      breakBufferAfter: parseInt(json.breakBufferAfter, 10) || 0,
+      breakExclusionMap: breakExclusionMap,
+      shiftTimes: shiftTimes,
+      tournamentPresets: tournamentPresets,
+      placementMode: json.placementMode || 'global',
+      postIntervals: json.postIntervals || {},
+      postPresets: postPresets
+    };
+  }
+
+  /**
+   * 旧形式（セクションベース）からConfigを読込む（マイグレーション用に残す）
+   * @param {Array<Array<*>>} data - シートデータ
+   * @returns {Config}
+   */
+  function loadConfigLegacy_(data) {
     // [コマ定義]
     var slotRange = findSectionRange_(data, 'コマ定義');
     var slots = parseSlots_(data, slotRange.start, slotRange.end);
@@ -57,13 +168,124 @@ var ConfigService = (function () {
     var shiftRange = findSectionRange_(data, 'シフト時間');
     var shiftTimes = parseShiftTimes_(data, shiftRange.start, shiftRange.end);
 
+    // [大会プリセット] — 省略可能（後方互換）
+    var tournamentPresets = [];
+    try {
+      var tpRange = findSectionRange_(data, '大会プリセット');
+      tournamentPresets = parseTournamentPresets_(data, tpRange.start, tpRange.end);
+    } catch (e) {
+      // セクション未発見は無視（旧形式互換）
+    }
+
     return {
       slots: slots,
       breakTimes: breakResult.breakTimes,
       breakDuration: breakResult.breakDuration,
+      breakBufferBefore: breakResult.breakBufferBefore,
+      breakBufferAfter: breakResult.breakBufferAfter,
       breakExclusionMap: breakExclusionMap,
-      shiftTimes: shiftTimes
+      shiftTimes: shiftTimes,
+      tournamentPresets: tournamentPresets,
+      placementMode: 'global',
+      postIntervals: {},
+      postPresets: []
     };
+  }
+
+  /**
+   * 内部ConfigからJSON文字列を生成する（旧形式→JSONマイグレーション用）
+   * @param {Config} config - 内部Config
+   * @returns {string} JSON文字列
+   */
+  function configToJson_(config) {
+    var bt = config.breakTimes;
+    var slotBoundaries = [];
+    for (var i = 0; i < config.slots.length; i++) {
+      slotBoundaries.push(TimeUtils.minToTimeStr(config.slots[i].startMin));
+    }
+
+    var breakTimesStr = {
+      earlyFirst: TimeUtils.minToTimeStr(bt.earlyFirst),
+      earlySecond: TimeUtils.minToTimeStr(bt.earlySecond),
+      amFirst: TimeUtils.minToTimeStr(bt.amFirst),
+      amSecond: TimeUtils.minToTimeStr(bt.amSecond),
+      pmFirst: TimeUtils.minToTimeStr(bt.pmFirst),
+      pmSecond: TimeUtils.minToTimeStr(bt.pmSecond)
+    };
+
+    var shiftTimesStr = {};
+    var shiftNames = Object.keys(config.shiftTimes);
+    for (var s = 0; s < shiftNames.length; s++) {
+      var st = config.shiftTimes[shiftNames[s]];
+      shiftTimesStr[shiftNames[s]] = {
+        start: TimeUtils.minToTimeStr(st.start),
+        end: TimeUtils.minToTimeStr(st.end),
+        pulldownStart: TimeUtils.minToTimeStr(st.pulldownStart),
+        pulldownEnd: TimeUtils.minToTimeStr(st.pulldownEnd)
+      };
+    }
+
+    var breakExclusionRows = {};
+    var exclKeys = Object.keys(config.breakExclusionMap || {});
+    for (var e = 0; e < exclKeys.length; e++) {
+      breakExclusionRows[exclKeys[e]] = config.breakExclusionMap[exclKeys[e]];
+    }
+
+    var tournamentPresets = [];
+    var tps = config.tournamentPresets || [];
+    for (var p = 0; p < tps.length; p++) {
+      tournamentPresets.push({
+        label: tps[p].label,
+        startStr: TimeUtils.minToTimeStr(tps[p].startMin),
+        endStr: TimeUtils.minToTimeStr(tps[p].endMin),
+        weekendOnly: tps[p].weekendOnly
+      });
+    }
+
+    // postPresets → activeWindowsのstartMin/endMin→startStr/endStr変換
+    var ppOut = [];
+    var pps = config.postPresets || [];
+    for (var pi = 0; pi < pps.length; pi++) {
+      var ppWindows = [];
+      var ppWin = pps[pi].activeWindows || [];
+      for (var pw = 0; pw < ppWin.length; pw++) {
+        ppWindows.push({
+          startStr: TimeUtils.minToTimeStr(ppWin[pw].startMin),
+          endStr: TimeUtils.minToTimeStr(ppWin[pw].endMin)
+        });
+      }
+      ppOut.push({
+        postName: pps[pi].postName,
+        enabled: pps[pi].enabled,
+        requiredLv: pps[pi].requiredLv,
+        order: pps[pi].order,
+        sortDir: pps[pi].sortDir,
+        concurrentPost: pps[pi].concurrentPost || null,
+        activeWindows: ppWindows
+      });
+    }
+
+    var result = {
+      version: 1,
+      slotBoundaries: slotBoundaries,
+      breakDuration: config.breakDuration,
+      breakBufferBefore: config.breakBufferBefore || 0,
+      breakBufferAfter: config.breakBufferAfter || 0,
+      breakTimes: breakTimesStr,
+      breakExclusionRows: breakExclusionRows,
+      shiftTimes: shiftTimesStr,
+      tournamentPresets: tournamentPresets
+    };
+    if (config.placementMode && config.placementMode !== 'global') {
+      result.placementMode = config.placementMode;
+    }
+    if (config.postIntervals && Object.keys(config.postIntervals).length > 0) {
+      result.postIntervals = config.postIntervals;
+    }
+    if (ppOut.length > 0) {
+      result.postPresets = ppOut;
+    }
+    return JSON.stringify(result);
   }
 
   /**
@@ -231,16 +453,26 @@ var ConfigService = (function () {
    */
   function parseBreakSettings_(data, start, end) {
     var breakDuration = 60; // デフォルト
+    var breakBufferBefore = 0; // デフォルト: 0=H6b使用
+    var breakBufferAfter = 0;
     var breakTimes = {
-      amFirst: 840,   // 14:00
-      amSecond: 900,  // 15:00
-      pmFirst: 990,   // 16:30
-      pmSecond: 1050  // 17:30
+      earlyFirst: 720,  // 12:00
+      earlySecond: 780, // 13:00
+      amFirst: 840,     // 14:00
+      amSecond: 900,    // 15:00
+      pmFirst: 990,     // 16:30
+      pmSecond: 1050    // 17:30
     };
 
     var keyMap = {
       '休憩時間(分)': 'duration',
       '休憩時間（分）': 'duration',
+      '休憩バッファ前(コマ)': 'bufferBefore',
+      '休憩バッファ前（コマ）': 'bufferBefore',
+      '休憩バッファ後(コマ)': 'bufferAfter',
+      '休憩バッファ後（コマ）': 'bufferAfter',
+      '早朝前半': 'earlyFirst',
+      '早朝後半': 'earlySecond',
       'AM前半': 'amFirst',
       'AM後半': 'amSecond',
       'PM前半': 'pmFirst',
@@ -257,12 +489,21 @@ var ConfigService = (function () {
         if (isNaN(breakDuration) || breakDuration <= 0) {
           throw new Error('ConfigService: 不正な休憩時間: ' + value);
         }
+      } else if (mapped === 'bufferBefore') {
+        breakBufferBefore = parseInt(value, 10) || 0;
+      } else if (mapped === 'bufferAfter') {
+        breakBufferAfter = parseInt(value, 10) || 0;
       } else if (mapped) {
         breakTimes[mapped] = parseTimeCell_(value);
       }
     }
 
-    return { breakTimes: breakTimes, breakDuration: breakDuration };
+    return {
+      breakTimes: breakTimes,
+      breakDuration: breakDuration,
+      breakBufferBefore: breakBufferBefore,
+      breakBufferAfter: breakBufferAfter
+    };
   }
 
   /**
@@ -314,6 +555,67 @@ var ConfigService = (function () {
   }
 
   /**
+   * 大会プリセットをパースする（内部）
+   * 各行: ラベル | 開始時刻 | 終了時刻 | 週末のみフラグ（○=true）
+   * @param {Array<Array<*>>} data
+   * @param {number} start
+   * @param {number} end
+   * @returns {Array<{label: string, startMin: number, endMin: number, weekendOnly: boolean}>}
+   */
+  function parseTournamentPresets_(data, start, end) {
+    var presets = [];
+    for (var i = start; i < end; i++) {
+      var label = String(data[i][0]).trim();
+      if (label === '') continue;
+
+      var startMin = parseTimeCell_(data[i][1]);
+      var endMin = parseTimeCell_(data[i][2]);
+      var flag = String(data[i][3] || '').trim();
+      var weekendOnly = flag === '○' || flag === 'true' || flag === 'TRUE';
+
+      presets.push({
+        label: label,
+        startMin: startMin,
+        endMin: endMin,
+        weekendOnly: weekendOnly
+      });
+    }
+    return presets;
+  }
+
+  /**
+   * コンフィグデータをJSON形式でシートに保存する
+   * UIからのデータ（既にH:MM形式）をそのままJSON.stringifyして保存。
+   * @param {string} configSheetName - コンフィグシート名
+   * @param {Object} configData - 保存するコンフィグデータ（JSON形式、H:MM文字列）
+   */
+  function saveConfig(configSheetName, configData) {
+    var json = {
+      version: 1,
+      slotBoundaries: configData.slotBoundaries,
+      breakDuration: configData.breakDuration,
+      breakBufferBefore: configData.breakBufferBefore || 0,
+      breakBufferAfter: configData.breakBufferAfter || 0,
+      breakTimes: configData.breakTimes,
+      breakExclusionRows: configData.breakExclusionRows || {},
+      shiftTimes: configData.shiftTimes,
+      tournamentPresets: configData.tournamentPresets || []
+    };
+    if (configData.placementMode) {
+      json.placementMode = configData.placementMode;
+    }
+    if (configData.postIntervals && Object.keys(configData.postIntervals).length > 0) {
+      json.postIntervals = configData.postIntervals;
+    }
+    if (configData.postPresets && configData.postPresets.length > 0) {
+      json.postPresets = configData.postPresets;
+    }
+    var jsonStr = JSON.stringify(json);
+    SheetGateway.clearSheet(configSheetName);
+    SheetGateway.setValues(configSheetName, 1, 1, [[jsonStr]]);
+  }
+
+  /**
    * 時刻セルをパースする（Date型自動変換対応）（内部）
    * @param {*} cell - セル値
    * @returns {number} 分
@@ -327,8 +629,13 @@ var ConfigService = (function () {
 
   return {
     loadConfig: loadConfig,
-    // テスト用に内部関数も公開
+    saveConfig: saveConfig,
+    // テスト用・マイグレーション用に内部関数も公開
+    loadConfigFromJson_: loadConfigFromJson_,
+    configToJson_: configToJson_,
+    loadConfigLegacy_: loadConfigLegacy_,
     findSectionRange_: findSectionRange_,
-    parseTimeCell_: parseTimeCell_
+    parseTimeCell_: parseTimeCell_,
+    parseTournamentPresets_: parseTournamentPresets_
   };
 })();

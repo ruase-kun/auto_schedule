@@ -206,6 +206,27 @@ var SheetGateway = (function () {
     return colorMap;
   }
 
+  /**
+   * 指定セルにノートを設定する
+   * @param {string} sheetName - シート名
+   * @param {number} row       - 行番号（1始まり）
+   * @param {number} col       - 列番号（1始まり）
+   * @param {string} text      - ノートテキスト
+   */
+  function setNote(sheetName, row, col, text) {
+    var sheet = getSheet(sheetName);
+    sheet.getRange(row, col).setNote(text);
+  }
+
+  /**
+   * シートの全データをクリアする
+   * @param {string} sheetName - シート名
+   */
+  function clearSheet(sheetName) {
+    var sheet = getSheet(sheetName);
+    sheet.clear();
+  }
+
   return {
     getSheet: getSheet,
     sheetExists: sheetExists,
@@ -216,6 +237,8 @@ var SheetGateway = (function () {
     getTimeRows: getTimeRows,
     appendRow: appendRow,
     copyTemplate: copyTemplate,
-    deleteSheetIfExists: deleteSheetIfExists
+    deleteSheetIfExists: deleteSheetIfExists,
+    setNote: setNote,
+    clearSheet: clearSheet
   };
 })();
