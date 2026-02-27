@@ -613,7 +613,8 @@ function uiConfig_loadConfig(deptName) {
       tournamentPresets: json.tournamentPresets || [],
       placementMode: json.placementMode || 'global',
       postIntervals: json.postIntervals || {},
-      postPresets: json.postPresets || []
+      postPresets: json.postPresets || [],
+      postPresetGroups: json.postPresetGroups || []
     };
   }
 
@@ -676,7 +677,8 @@ function uiConfig_loadConfig(deptName) {
     tournamentPresets: presetsStr,
     placementMode: config.placementMode || 'global',
     postIntervals: config.postIntervals || {},
-    postPresets: []
+    postPresets: [],
+    postPresetGroups: []
   };
 }
 

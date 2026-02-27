@@ -610,6 +610,9 @@ var ConfigService = (function () {
     if (configData.postPresets && configData.postPresets.length > 0) {
       json.postPresets = configData.postPresets;
     }
+    if (configData.postPresetGroups && configData.postPresetGroups.length > 0) {
+      json.postPresetGroups = configData.postPresetGroups;
+    }
     var jsonStr = JSON.stringify(json);
     SheetGateway.clearSheet(configSheetName);
     SheetGateway.setValues(configSheetName, 1, 1, [[jsonStr]]);

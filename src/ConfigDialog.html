@@ -270,6 +270,36 @@
     white-space: nowrap;
   }
 
+  /* プリセットグループツールバー */
+  .pp-group-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 6px 8px;
+    background: #f8f9fa;
+    border-radius: 4px;
+    border: 1px solid #e0e0e0;
+  }
+  .pp-group-bar select {
+    flex: 1;
+    padding: 4px 6px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    font-size: 12px;
+  }
+  .pp-group-bar .pp-group-btn {
+    padding: 4px 10px;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: #fff;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .pp-group-bar .pp-group-btn:hover { background: #f0f0f0; }
+  .pp-group-bar .pp-group-btn.danger:hover { background: #fce8e6; color: #c5221f; }
+
   /* ローディング */
   .loading-area {
     text-align: center;
@@ -408,7 +438,17 @@
     <div style="font-size:12px;color:#888;margin-bottom:8px;">
       各持ち場の有効/無効、スキルレベル、配置順序、掛け持ち先を設定します。
     </div>
-    <div class="slot-list" id="postPresetList" style="max-height:360px;"></div>
+    <!-- プリセットグループ（名前付き保存/読込） -->
+    <div class="pp-group-bar">
+      <span style="font-size:12px;color:#555;white-space:nowrap;">保存済み:</span>
+      <select id="ppGroupSelect">
+        <option value="">-- 選択 --</option>
+      </select>
+      <button class="pp-group-btn" onclick="loadPresetGroup()">読込</button>
+      <button class="pp-group-btn" onclick="savePresetGroup()">名前を付けて保存</button>
+      <button class="pp-group-btn danger" onclick="deletePresetGroup()">削除</button>
+    </div>
+    <div class="slot-list" id="postPresetList" style="max-height:320px;"></div>
   </div>
 
   <!-- エラー -->
@@ -498,6 +538,7 @@
       if (!state.config.placementMode) state.config.placementMode = 'global';
       if (!state.config.postIntervals) state.config.postIntervals = {};
       if (!state.config.postPresets) state.config.postPresets = [];
+      if (!state.config.postPresetGroups) state.config.postPresetGroups = [];
       // postPresetsが空の場合→テンプレート持ち場からデフォルト自動生成
       if (state.config.postPresets.length === 0 && state.templatePostNames.length > 0) {
         generateDefaultPresets();
@@ -560,6 +601,7 @@
     renderBreakSettings();
     renderPresets();
     renderPostPresets();
+    renderPresetGroups();
   }
 
   // 配置モード
@@ -839,10 +881,10 @@
       html += '<input type="number" value="' + p.order + '" min="1" max="99" ' +
         'onchange="updatePostPreset(' + i + ',\'order\',parseInt(this.value,10))">';
 
-      // ソート (ASC/DESC)
+      // ソート (降順/昇順)
       html += '<select onchange="updatePostPreset(' + i + ',\'sortDir\',this.value)" style="width:56px;">';
-      html += '<option value="DESC"' + (p.sortDir === 'DESC' ? ' selected' : '') + '>DESC</option>';
-      html += '<option value="ASC"' + (p.sortDir === 'ASC' ? ' selected' : '') + '>ASC</option>';
+      html += '<option value="DESC"' + (p.sortDir === 'DESC' ? ' selected' : '') + '>降順</option>';
+      html += '<option value="ASC"' + (p.sortDir === 'ASC' ? ' selected' : '') + '>昇順</option>';
       html += '</select>';
 
       // 掛け持ち先 (他持ち場select + "なし")
@@ -928,6 +970,85 @@
     var h = Math.floor(min / 60);
     var m = min % 60;
     return h + ':' + (m < 10 ? '0' + m : '' + m);
+  }
+
+  // --- プリセットグループ（名前付き保存/読込） ---
+
+  /**
+   * グループ選択ドロップダウンを描画
+   */
+  function renderPresetGroups() {
+    var sel = document.getElementById('ppGroupSelect');
+    var groups = state.config.postPresetGroups || [];
+    var html = '<option value="">-- 選択 --</option>';
+    for (var i = 0; i < groups.length; i++) {
+      html += '<option value="' + i + '">' + escHtml(groups[i].name) + '</option>';
+    }
+    sel.innerHTML = html;
+  }
+
+  /**
+   * 現在のpostPresetsを名前を付けて保存
+   */
+  function savePresetGroup() {
+    var name = prompt('プリセット名を入力してください:');
+    if (!name || name.trim() === '') return;
+    name = name.trim();
+
+    if (!state.config.postPresetGroups) state.config.postPresetGroups = [];
+    var groups = state.config.postPresetGroups;
+
+    // 同名があれば上書き確認
+    var existIdx = -1;
+    for (var i = 0; i < groups.length; i++) {
+      if (groups[i].name === name) { existIdx = i; break; }
+    }
+    if (existIdx !== -1) {
+      if (!confirm('「' + name + '」は既に存在します。上書きしますか？')) return;
+      groups[existIdx].presets = JSON.parse(JSON.stringify(state.config.postPresets));
+    } else {
+      groups.push({
+        name: name,
+        presets: JSON.parse(JSON.stringify(state.config.postPresets))
+      });
+    }
+    renderPresetGroups();
+  }
+
+  /**
+   * 選択中のグループを読み込んで現在のpostPresetsに適用
+   */
+  function loadPresetGroup() {
+    var sel = document.getElementById('ppGroupSelect');
+    var idx = sel.value;
+    if (idx === '') { alert('読み込むプリセットを選択してください。'); return; }
+    idx = parseInt(idx, 10);
+
+    var groups = state.config.postPresetGroups || [];
+    if (idx < 0 || idx >= groups.length) return;
+
+    if (!confirm('「' + groups[idx].name + '」を読み込みます。現在の設定は上書きされます。よろしいですか？')) return;
+
+    state.config.postPresets = JSON.parse(JSON.stringify(groups[idx].presets));
+    renderPostPresets();
+  }
+
+  /**
+   * 選択中のグループを削除
+   */
+  function deletePresetGroup() {
+    var sel = document.getElementById('ppGroupSelect');
+    var idx = sel.value;
+    if (idx === '') { alert('削除するプリセットを選択してください。'); return; }
+    idx = parseInt(idx, 10);
+
+    var groups = state.config.postPresetGroups || [];
+    if (idx < 0 || idx >= groups.length) return;
+
+    if (!confirm('「' + groups[idx].name + '」を削除しますか？')) return;
+
+    groups.splice(idx, 1);
+    renderPresetGroups();
   }
 
   // --- 保存 ---
