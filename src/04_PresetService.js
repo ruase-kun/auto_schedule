@@ -145,8 +145,120 @@ var PresetService = (function () {
     return windows;
   }
 
+  /**
+   * プリセットシートから無効な持ち場名の一覧を取得する。
+   * loadPresets() とは異なり、order/requiredLv の有無に関わらず
+   * 「有効」列が false の持ち場名をすべて返す。
+   *
+   * @param {string} presetSheetName - プリセットシート名
+   * @returns {string[]} 無効な持ち場名の配列
+   */
+  function getDisabledPostNames(presetSheetName) {
+    var data = SheetGateway.getValues(presetSheetName);
+    var disabled = [];
+    for (var i = 1; i < data.length; i++) {
+      var postName = String(data[i][0]).trim();
+      if (postName === '') continue;
+      if (!parseEnabled_(data[i][1])) {
+        disabled.push(postName);
+      }
+    }
+    return disabled;
+  }
+
+  /**
+   * Config JSON内のpostPresetsからPostPreset[]を生成する（ソート・バリデーション込み）
+   *
+   * activeWindowsはUI形式（startStr/endStr）で格納されている場合、startMin/endMinに変換する。
+   * 既にstartMin/endMin形式の場合はそのまま使用する。
+   *
+   * @param {Array<Object>} postPresets - config.postPresets配列
+   * @returns {PostPreset[]} ソート済みの有効プリセット
+   */
+  function loadPresetsFromConfig(postPresets) {
+    if (!postPresets || postPresets.length === 0) return [];
+
+    var presets = [];
+    for (var i = 0; i < postPresets.length; i++) {
+      var pp = postPresets[i];
+      var postName = String(pp.postName || '').trim();
+      if (postName === '') continue;
+
+      var enabled = !!pp.enabled;
+      var requiredLv = parseInt(pp.requiredLv, 10);
+      var order = parseInt(pp.order, 10);
+      var sortDir = parseSortDir_(pp.sortDir || 'DESC');
+      var concurrentPost = parseConcurrentPost_(pp.concurrentPost);
+
+      // activeWindows変換（startStr/endStr → startMin/endMin）
+      var activeWindows = [];
+      var rawWindows = pp.activeWindows || [];
+      for (var w = 0; w < rawWindows.length; w++) {
+        var win = rawWindows[w];
+        if (win.startMin !== undefined && win.endMin !== undefined) {
+          activeWindows.push({ startMin: win.startMin, endMin: win.endMin });
+        } else if (win.startStr && win.endStr) {
+          activeWindows.push({
+            startMin: TimeUtils.parseTimeToMin(win.startStr),
+            endMin: TimeUtils.parseTimeToMin(win.endStr)
+          });
+        }
+      }
+
+      // 無効なプリセットはスキップ（loadPresetsと同等のバリデーション）
+      if (!enabled) continue;
+      if (isNaN(order) || order < 1) continue;
+      if (isNaN(requiredLv) || requiredLv < 1) continue;
+      if (requiredLv > 4) {
+        throw new Error(
+          'PresetService: 必要Lvが1〜4の範囲外です: ' + postName + ' → ' + requiredLv
+        );
+      }
+
+      presets.push({
+        postName: postName,
+        enabled: enabled,
+        requiredLv: requiredLv,
+        order: order,
+        sortDir: sortDir,
+        concurrentPost: concurrentPost,
+        activeWindows: activeWindows
+      });
+    }
+
+    // order昇順 → 同一orderならpostName昇順
+    presets.sort(function (a, b) {
+      if (a.order !== b.order) return a.order - b.order;
+      return a.postName.localeCompare(b.postName);
+    });
+
+    return presets;
+  }
+
+  /**
+   * Config JSON内のpostPresetsから無効な持ち場名の一覧を取得する
+   *
+   * @param {Array<Object>} postPresets - config.postPresets配列
+   * @returns {string[]} 無効な持ち場名の配列
+   */
+  function getDisabledPostNamesFromConfig(postPresets) {
+    if (!postPresets || postPresets.length === 0) return [];
+    var disabled = [];
+    for (var i = 0; i < postPresets.length; i++) {
+      var postName = String(postPresets[i].postName || '').trim();
+      if (postName === '') continue;
+      if (!postPresets[i].enabled) {
+        disabled.push(postName);
+      }
+    }
+    return disabled;
+  }
+
   return {
     loadPresets: loadPresets,
+    getDisabledPostNames: getDisabledPostNames,
+    loadPresetsFromConfig: loadPresetsFromConfig,
+    getDisabledPostNamesFromConfig: getDisabledPostNamesFromConfig,
     // テスト用に内部関数も公開
     parseActiveWindows_: parseActiveWindows_,
     parseSortDir_: parseSortDir_

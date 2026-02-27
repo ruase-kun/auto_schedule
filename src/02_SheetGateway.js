@@ -154,7 +154,19 @@ var SheetGateway = (function () {
     var src = getSheet(srcName);
     var newSheet = src.copyTo(ss);
     newSheet.setName(destName);
+    // テンプレートから継承されたデータ入力規則をクリア（書込み時の違反防止）
+    newSheet.getDataRange().clearDataValidations();
     return newSheet;
+  }
+
+  /**
+   * シート末尾に1行追記する
+   * @param {string} sheetName - シート名
+   * @param {Array<*>} rowArray - 1次元配列
+   */
+  function appendRow(sheetName, rowArray) {
+    var sheet = getSheet(sheetName);
+    sheet.appendRow(rowArray);
   }
 
   /**
@@ -169,14 +181,64 @@ var SheetGateway = (function () {
     }
   }
 
+  /**
+   * テンプレートヘッダー行の持ち場名→背景色マップを取得する
+   * @param {string} templateSheetName - テンプレートシート名
+   * @returns {Object<string, string>} postName → 背景色("#rrggbb")
+   */
+  function getPostColors(templateSheetName) {
+    var sheet = getSheet(templateSheetName);
+    var lastCol = sheet.getLastColumn();
+    if (lastCol < 3) return {};
+
+    var headerRange = sheet.getRange(1, 1, 1, lastCol);
+    var values = headerRange.getValues()[0];
+    var colors = headerRange.getBackgrounds()[0];
+
+    var colorMap = {};
+    for (var c = 2; c < values.length; c++) {
+      var val = values[c];
+      if (val === 0 || val === '0') break;
+      if (val !== '' && val !== null && val !== undefined) {
+        colorMap[String(val)] = colors[c];
+      }
+    }
+    return colorMap;
+  }
+
+  /**
+   * 指定セルにノートを設定する
+   * @param {string} sheetName - シート名
+   * @param {number} row       - 行番号（1始まり）
+   * @param {number} col       - 列番号（1始まり）
+   * @param {string} text      - ノートテキスト
+   */
+  function setNote(sheetName, row, col, text) {
+    var sheet = getSheet(sheetName);
+    sheet.getRange(row, col).setNote(text);
+  }
+
+  /**
+   * シートの全データをクリアする
+   * @param {string} sheetName - シート名
+   */
+  function clearSheet(sheetName) {
+    var sheet = getSheet(sheetName);
+    sheet.clear();
+  }
+
   return {
     getSheet: getSheet,
     sheetExists: sheetExists,
     getValues: getValues,
     setValues: setValues,
     detectPosts: detectPosts,
+    getPostColors: getPostColors,
     getTimeRows: getTimeRows,
+    appendRow: appendRow,
     copyTemplate: copyTemplate,
-    deleteSheetIfExists: deleteSheetIfExists
+    deleteSheetIfExists: deleteSheetIfExists,
+    setNote: setNote,
+    clearSheet: clearSheet
   };
 })();

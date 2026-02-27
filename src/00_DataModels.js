@@ -45,7 +45,12 @@
  * @property {BreakTimes}                     breakTimes        - 休憩時刻
  * @property {number}                         breakDuration     - 休憩時間（分）
  * @property {Object<number, number[]>}       breakExclusionMap - 休憩行→除外行マッピング
+ * @property {number}                         breakBufferBefore - 休憩前バッファ（コマ数, 1コマ=30分, 0=H6b使用）
+ * @property {number}                         breakBufferAfter  - 休憩後バッファ（コマ数, 1コマ=30分, 0=H6b使用）
  * @property {Object<string, ShiftTimeDef>}   shiftTimes        - シフト名→時間定義
+ * @property {string}                         placementMode     - 配置モード ("global"|"perPost")
+ * @property {Object<string, number>}         postIntervals     - 持ち場別コマ数 (perPostモード用)
+ * @property {PostPreset[]}                   postPresets       - 配置プリセット（JSON保存用、未設定時は旧シートにフォールバック）
  */
 
 /**
@@ -122,4 +127,42 @@
  * @property {string}          postName  - 持ち場名
  * @property {string}          staffName - スタッフ名
  * @property {"auto"|"carry"}  source    - 配置ソース
+ */
+
+/**
+ * 陣テンプレート
+ * @typedef {Object} WaveTemplate
+ * @property {string}  templateName - テンプレート名
+ * @property {Wave[]}  waves        - 陣一覧
+ */
+
+/**
+ * 陣（ウェーブ）
+ * @typedef {Object} Wave
+ * @property {number}     waveNumber - 陣番号（1始まり）
+ * @property {WaveTask[]} tasks      - 工程タスク一覧
+ */
+
+/**
+ * 陣の工程タスク
+ * @typedef {Object} WaveTask
+ * @property {string}   process       - 工程名（ピック, 梱包, 振り分け等）
+ * @property {number}   startMin      - 開始時刻（分）
+ * @property {number}   endMin        - 終了時刻（分）
+ * @property {string[]} assignedStaff - 担当者リスト（Level 1 では空配列）
+ */
+
+/**
+ * 欠勤者再配置ギャップ（穴埋め対象セル）
+ * @typedef {Object} ReplacementGap
+ * @property {number} timeMin   - 時刻（分）
+ * @property {number} rowNumber - 行番号
+ * @property {string} postName  - 持ち場名
+ */
+
+/**
+ * 欠勤者再配置結果
+ * @typedef {Object} ReplacementResult
+ * @property {Placement[]}      filled   - 充填済み配置
+ * @property {ReplacementGap[]} unfilled - 未充填ギャップ
  */

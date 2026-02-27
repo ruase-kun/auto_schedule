@@ -130,7 +130,7 @@ var TimelineService = (function () {
   }
 
   /**
-   * 個人シートを生成する（マトリクス構築 + シート書込み）
+   * 個人シートを生成する（マトリクス構築 + シート書込み + 色塗り）
    *
    * @param {Object} params
    * @param {string} params.dateSheetName - 日別配置表シート名（例: '03/15(土)'）
@@ -140,6 +140,7 @@ var TimelineService = (function () {
    * @param {number} params.breakDuration - 休憩時間（分）
    * @param {Exclusions} params.exclusions - 除外情報
    * @param {TimeRow[]} params.timeRows - テンプレ時間行
+   * @param {Object<string, string>} [params.postColorMap] - 持ち場名→背景色マップ（省略時は色なし）
    * @returns {string[][]} 書き込んだマトリクス
    */
   function generate(params) {
@@ -158,8 +159,46 @@ var TimelineService = (function () {
     // 5. 一括書込み
     SheetGateway.setValues(personalSheetName, 1, 1, matrix);
 
-    // 6. マトリクスを返す
+    // 6. 背景色塗り（postColorMap がある場合）
+    applyPostColors_(personalSheetName, matrix, params.postColorMap);
+
+    // 7. マトリクスを返す
     return matrix;
+  }
+
+  /**
+   * 個人シートのセルに持ち場ヘッダーの背景色を適用する
+   *
+   * @param {string} sheetName - 個人シート名
+   * @param {string[][]} matrix - マトリクス（ヘッダー行 + データ行）
+   * @param {Object<string, string>} [postColorMap] - 持ち場名→背景色マップ
+   */
+  function applyPostColors_(sheetName, matrix, postColorMap) {
+    if (!postColorMap || Object.keys(postColorMap).length === 0) return;
+
+    var numRows = matrix.length;
+    var numCols = matrix[0].length;
+    var colors = [];
+
+    for (var r = 0; r < numRows; r++) {
+      var row = [];
+      for (var c = 0; c < numCols; c++) {
+        if (r === 0 || c === 0) {
+          // ヘッダー行・時間列は白
+          row.push('#ffffff');
+          continue;
+        }
+        var cell = matrix[r][c];
+        // "レジ1/ショーケース1" のような複数持ち場は先頭の色を使う
+        var postName = (cell.indexOf('/') !== -1) ? cell.split('/')[0] : cell;
+        var color = postColorMap[postName];
+        row.push(color || '#ffffff');
+      }
+      colors.push(row);
+    }
+
+    var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+    sheet.getRange(1, 1, numRows, numCols).setBackgrounds(colors);
   }
 
   return {
